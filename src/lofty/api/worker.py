@@ -2,20 +2,20 @@
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lofty.config import settings
 from lofty.db.session import get_async_session
+from lofty.models.finetune import FineTuneJob
 from lofty.models.job import GenerationJob, JobStatus
 from lofty.models.track import Track
-from lofty.models.finetune import FineTuneJob
 
 logger = structlog.get_logger()
 
@@ -42,6 +42,7 @@ async def verify_worker_key(
 
 # --- Schemas ---
 
+
 class WorkerJobResponse(BaseModel):
     job_id: uuid.UUID
     user_id: uuid.UUID
@@ -64,7 +65,12 @@ class CancelledResponse(BaseModel):
 
 # --- Endpoints ---
 
-@router.get("/next-job", response_model=WorkerJobResponse, responses={204: {"description": "No pending jobs"}})
+
+@router.get(
+    "/next-job",
+    response_model=WorkerJobResponse,
+    responses={204: {"description": "No pending jobs"}},
+)
 async def next_job(
     engine: str | None = None,
     compute_mode: str | None = None,
@@ -103,11 +109,12 @@ async def next_job(
 
     if job is None:
         from fastapi.responses import Response
+
         return Response(status_code=204)
 
     # Claim it
     job.status = JobStatus.RUNNING.value
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = datetime.now(UTC)
     await db.commit()
 
     logger.info("worker.job_claimed", job_id=str(job.id), prompt=job.prompt[:60])
@@ -138,14 +145,12 @@ async def upload_result(
     db: AsyncSession = Depends(get_async_session),
 ):
     """Receive generation result from worker."""
-    result = await db.execute(
-        select(GenerationJob).where(GenerationJob.id == job_id)
-    )
+    result = await db.execute(select(GenerationJob).where(GenerationJob.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "Job not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if status_str == "completed" and audio_file is not None:
         # Read audio bytes
@@ -205,6 +210,7 @@ async def report_progress(
     """Report generation progress (stored in Redis for frontend polling)."""
     try:
         from lofty.dependencies import get_redis
+
         redis = await get_redis()
         await redis.setex(f"job_progress:{job_id}", 300, str(body.progress))
     except Exception:
@@ -222,6 +228,7 @@ async def check_cancelled(
     # Check Redis flag first (set by cancel_job)
     try:
         from lofty.dependencies import get_redis
+
         redis = await get_redis()
         flag = await redis.get(f"job_cancel:{job_id}")
         if flag:
@@ -230,14 +237,13 @@ async def check_cancelled(
         pass
 
     # Fallback: check DB
-    result = await db.execute(
-        select(GenerationJob.status).where(GenerationJob.id == job_id)
-    )
+    result = await db.execute(select(GenerationJob.status).where(GenerationJob.id == job_id))
     row = result.scalar_one_or_none()
     return CancelledResponse(cancelled=row == JobStatus.CANCELLED.value)
 
 
 # --- Fine-Tune Worker Endpoints ---
+
 
 class WorkerFineTuneJobResponse(BaseModel):
     job_id: uuid.UUID
@@ -282,11 +288,12 @@ async def next_finetune_job(
 
     if job is None:
         from fastapi.responses import Response
+
         return Response(status_code=204)
 
     # Claim it
     job.status = "running"
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = datetime.now(UTC)
 
     # Load track data for the worker
     tracks_result = await db.execute(
@@ -296,22 +303,22 @@ async def next_finetune_job(
 
     track_data = []
     for t in tracks:
-        upload_result = await db.execute(
-            select(AudioUpload).where(AudioUpload.id == t.upload_id)
-        )
+        upload_result = await db.execute(select(AudioUpload).where(AudioUpload.id == t.upload_id))
         upload = upload_result.scalar_one_or_none()
         if upload is None:
             continue
-        track_data.append({
-            "storage_key": upload.storage_key,
-            "original_filename": upload.original_filename,
-            "format": upload.format,
-            "lyrics": t.lyrics or "",
-            "caption": t.caption or "",
-            "bpm": t.bpm,
-            "key_scale": t.key_scale,
-            "duration_seconds": t.duration_seconds,
-        })
+        track_data.append(
+            {
+                "storage_key": upload.storage_key,
+                "original_filename": upload.original_filename,
+                "format": upload.format,
+                "lyrics": t.lyrics or "",
+                "caption": t.caption or "",
+                "bpm": t.bpm,
+                "key_scale": t.key_scale,
+                "duration_seconds": t.duration_seconds,
+            }
+        )
 
     await db.commit()
 
@@ -338,15 +345,14 @@ async def report_finetune_progress(
     # Update Redis for fast polling
     try:
         from lofty.dependencies import get_redis
+
         redis = await get_redis()
         await redis.setex(f"finetune_progress:{job_id}", 3600, str(body.progress))
     except Exception:
         pass
 
     # Also update DB directly
-    result = await db.execute(
-        select(FineTuneJob).where(FineTuneJob.id == job_id)
-    )
+    result = await db.execute(select(FineTuneJob).where(FineTuneJob.id == job_id))
     job = result.scalar_one_or_none()
     if job and job.status == "running":
         job.progress = body.progress
@@ -374,14 +380,12 @@ async def upload_finetune_result(
     from lofty.models.finetune import LoRAAdapter
     from lofty.services.storage import storage_client
 
-    result = await db.execute(
-        select(FineTuneJob).where(FineTuneJob.id == job_id)
-    )
+    result = await db.execute(select(FineTuneJob).where(FineTuneJob.id == job_id))
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "Finetune job not found")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if status_str == "completed" and adapter_file is not None:
         adapter_bytes = await adapter_file.read()
@@ -438,6 +442,7 @@ async def check_finetune_cancelled(
     """Check if a finetune job has been cancelled."""
     try:
         from lofty.dependencies import get_redis
+
         redis = await get_redis()
         flag = await redis.get(f"finetune_cancel:{job_id}")
         if flag:
@@ -445,9 +450,7 @@ async def check_finetune_cancelled(
     except Exception:
         pass
 
-    result = await db.execute(
-        select(FineTuneJob.status).where(FineTuneJob.id == job_id)
-    )
+    result = await db.execute(select(FineTuneJob.status).where(FineTuneJob.id == job_id))
     row = result.scalar_one_or_none()
     return CancelledResponse(cancelled=row == "cancelled")
 
@@ -463,6 +466,7 @@ async def download_storage_file(
     direct access to MinIO.
     """
     from fastapi.responses import Response
+
     from lofty.services.storage import storage_client
 
     try:

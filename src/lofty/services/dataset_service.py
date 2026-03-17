@@ -1,7 +1,5 @@
 """Dataset service: CRUD and processing dispatch."""
 
-import math
-
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,11 +64,7 @@ async def list_datasets(
         .offset((page - 1) * per_page)
         .limit(per_page)
     )
-    count_query = (
-        select(func.count())
-        .select_from(Dataset)
-        .where(Dataset.user_id == user.id)
-    )
+    count_query = select(func.count()).select_from(Dataset).where(Dataset.user_id == user.id)
 
     result = await db.execute(query)
     datasets = list(result.scalars().all())
@@ -146,7 +140,9 @@ async def remove_track_from_dataset(
         return False
 
     dataset.num_tracks = max(0, dataset.num_tracks - 1)
-    dataset.total_duration_seconds = max(0.0, dataset.total_duration_seconds - track.duration_seconds)
+    dataset.total_duration_seconds = max(
+        0.0, dataset.total_duration_seconds - track.duration_seconds
+    )
 
     await db.delete(track)
     await db.commit()

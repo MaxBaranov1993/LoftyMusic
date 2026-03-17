@@ -69,9 +69,7 @@ async def _get_user_from_ticket(ticket: str, db: AsyncSession) -> tuple[User, st
         raise HTTPException(status_code=401, detail="Invalid or expired ticket")
 
     data = json.loads(raw)
-    result = await db.execute(
-        select(User).where(User.id == data["user_id"])
-    )
+    result = await db.execute(select(User).where(User.id == data["user_id"]))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")
@@ -138,8 +136,11 @@ async def stream_job_progress(
                     # Sync results from Redis → DB (for remote workers)
                     if fresh_job.status not in terminal_statuses:
                         from lofty.services.result_sync import sync_job_result
+
                         async with AsyncSessionLocal() as sync_db:
-                            fresh_job_sync = await job_service.get_job(sync_db, job_id_str, user_ref)
+                            fresh_job_sync = await job_service.get_job(
+                                sync_db, job_id_str, user_ref
+                            )
                             if fresh_job_sync:
                                 await sync_job_result(sync_db, fresh_job_sync)
                                 # Re-read after sync
@@ -148,25 +149,34 @@ async def stream_job_progress(
 
                     if fresh_job and fresh_job.status in terminal_statuses:
                         if fresh_job.status == "completed" and fresh_job.track:
-                            yield _sse_event("complete", {
-                                "status": "completed",
-                                "track_id": str(fresh_job.track.id),
-                            })
+                            yield _sse_event(
+                                "complete",
+                                {
+                                    "status": "completed",
+                                    "track_id": str(fresh_job.track.id),
+                                },
+                            )
                         elif fresh_job.status == "failed":
-                            yield _sse_event("error", {
-                                "status": "failed",
-                                "message": fresh_job.error_message or "Generation failed",
-                            })
+                            yield _sse_event(
+                                "error",
+                                {
+                                    "status": "failed",
+                                    "message": fresh_job.error_message or "Generation failed",
+                                },
+                            )
                         else:
                             yield _sse_event("cancelled", {"status": "cancelled"})
                         break
 
                 # Emit progress update if changed
                 if progress != last_progress:
-                    yield _sse_event("progress", {
-                        "progress": progress,
-                        "status": "running",
-                    })
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "progress": progress,
+                            "status": "running",
+                        },
+                    )
                     last_progress = progress
                 elif tick_count % heartbeat_interval == 0:
                     # Heartbeat keeps the connection alive through proxies/ALBs

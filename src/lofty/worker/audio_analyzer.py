@@ -51,15 +51,15 @@ def _analyze_with_ace_step(audio_bytes: bytes, audio_format: str) -> dict | None
     This is a heavyweight operation that needs the ACE-Step engine loaded.
     """
     try:
-        from acestep.handler import AceStepHandler
-        from acestep.inference import understand_music
-        from acestep.llm_inference import LLMHandler
+        from acestep.handler import AceStepHandler  # noqa: F401
+        from acestep.inference import understand_music  # noqa: F401
+        from acestep.llm_inference import LLMHandler  # noqa: F401
     except ImportError:
         logger.debug("ACE-Step not installed, skipping ACE analysis")
         return None
 
     # Get the handlers from the loaded engine (avoid loading a second copy)
-    from lofty.worker.generator import get_engine, detect_engine_type
+    from lofty.worker.generator import get_engine
 
     try:
         engine = get_engine("ace-step-1.5")
@@ -127,6 +127,7 @@ def _analyze_basic(audio_bytes: bytes) -> dict:
 
     try:
         import soundfile as sf
+
         info = sf.info(io.BytesIO(audio_bytes))
         result["duration_seconds"] = info.duration
     except Exception:

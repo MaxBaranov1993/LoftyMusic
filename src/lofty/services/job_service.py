@@ -1,7 +1,6 @@
 """Job service: CRUD operations and Celery task dispatch."""
 
 import math
-import uuid
 
 import structlog
 from fastapi import HTTPException, status
@@ -15,6 +14,7 @@ from lofty.models.user import User
 from lofty.schemas.job import JobCreate
 
 logger = structlog.get_logger()
+
 
 # Shared pagination helper — used by both job_service and track_service
 def calculate_pages(total: int, per_page: int) -> int:
@@ -50,11 +50,13 @@ async def create_job(
             .select_from(GenerationJob)
             .where(
                 GenerationJob.user_id == user.id,
-                GenerationJob.status.in_([
-                    JobStatus.PENDING.value,
-                    JobStatus.QUEUED.value,
-                    JobStatus.RUNNING.value,
-                ]),
+                GenerationJob.status.in_(
+                    [
+                        JobStatus.PENDING.value,
+                        JobStatus.QUEUED.value,
+                        JobStatus.RUNNING.value,
+                    ]
+                ),
             )
         )
         if active_count.scalar_one() > 0:
@@ -94,7 +96,9 @@ async def create_job(
                         "model_name": job.model_name,
                         "generation_params": job.generation_params or {},
                         "user_id": str(job.user_id),
-                        "lora_adapter_id": str(job.lora_adapter_id) if job.lora_adapter_id else None,
+                        "lora_adapter_id": (
+                            str(job.lora_adapter_id) if job.lora_adapter_id else None
+                        ),
                     },
                     queue="gpu",
                 )
@@ -137,8 +141,8 @@ async def list_jobs(
         .options(selectinload(GenerationJob.track))
         .where(GenerationJob.user_id == user.id)
     )
-    count_query = select(func.count()).select_from(GenerationJob).where(
-        GenerationJob.user_id == user.id
+    count_query = (
+        select(func.count()).select_from(GenerationJob).where(GenerationJob.user_id == user.id)
     )
 
     if status is not None:
@@ -218,8 +222,3 @@ async def delete_job(
     await db.delete(job)
     await db.commit()
     return True
-
-
-def calculate_pages(total: int, per_page: int) -> int:
-    """Calculate total number of pages."""
-    return max(1, math.ceil(total / per_page))

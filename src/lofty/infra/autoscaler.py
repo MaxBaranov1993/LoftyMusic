@@ -88,8 +88,7 @@ def check_and_scale() -> dict:
         # Scale DOWN: queue empty and idle instances exist
         elif queue_depth == 0 and len(running) > settings.autoscaler_min_instances:
             idle_instances = [
-                i for i in running
-                if now - i.created_at > settings.autoscaler_idle_timeout
+                i for i in running if now - i.created_at > settings.autoscaler_idle_timeout
             ]
             if idle_instances and now - _last_scale_down > SCALE_COOLDOWN:
                 oldest = idle_instances[0]

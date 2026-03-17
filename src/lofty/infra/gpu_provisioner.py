@@ -19,13 +19,13 @@ import structlog
 logger = structlog.get_logger()
 
 
-class GpuBackend(str, enum.Enum):
+class GpuBackend(enum.StrEnum):
     LOCAL = "local"
     GOOGLE = "google"
     CLOUD = "cloud"
 
 
-class InstanceStatus(str, enum.Enum):
+class InstanceStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     STOPPING = "stopping"
@@ -76,6 +76,7 @@ class GpuProvisioner(abc.ABC):
 # ---------------------------------------------------------------------------
 # Local provisioner – uses the machine's own GPU/CPU
 # ---------------------------------------------------------------------------
+
 
 class LocalProvisioner(GpuProvisioner):
     """Uses the local machine's GPU or CPU. Zero cost."""
@@ -135,6 +136,7 @@ class LocalProvisioner(GpuProvisioner):
 # ---------------------------------------------------------------------------
 # Google Colab / free-tier provisioner
 # ---------------------------------------------------------------------------
+
 
 class GoogleColabProvisioner(GpuProvisioner):
     """Connect to a Google Colab or Kaggle notebook running as a remote worker.
@@ -227,6 +229,7 @@ class GoogleColabProvisioner(GpuProvisioner):
 # Cloud provisioner – RunPod / Vast.ai (pay-per-use)
 # ---------------------------------------------------------------------------
 
+
 class CloudProvisioner(GpuProvisioner):
     """On-demand GPU instances via RunPod API.
 
@@ -260,8 +263,7 @@ class CloudProvisioner(GpuProvisioner):
 
         if not self._api_key:
             raise RuntimeError(
-                "RunPod API key not configured. "
-                "Set CLOUD_GPU_API_KEY in your environment."
+                "RunPod API key not configured. Set CLOUD_GPU_API_KEY in your environment."
             )
 
         # Call RunPod API to create a pod
@@ -288,7 +290,11 @@ class CloudProvisioner(GpuProvisioner):
             )
 
         if resp.status_code not in (200, 201):
-            logger.error("cloud_provisioner.spin_up_failed", status=resp.status_code, body=resp.text)
+            logger.error(
+                "cloud_provisioner.spin_up_failed",
+                status=resp.status_code,
+                body=resp.text,
+            )
             raise RuntimeError(f"RunPod API error: {resp.status_code}")
 
         pod_data = resp.json()

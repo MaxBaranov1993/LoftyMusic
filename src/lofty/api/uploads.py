@@ -55,7 +55,7 @@ async def upload_audio(
         if audio_format is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unsupported audio format. Accepted: WAV, MP3, FLAC, OGG.",
+                detail="Unsupported audio format. Accepted: WAV, MP3, FLAC, OGG.",
             )
 
     # Read file data
@@ -63,7 +63,9 @@ async def upload_audio(
     if len(data) > upload_service.MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large. Maximum size: {upload_service.MAX_FILE_SIZE // (1024*1024)} MB.",
+            detail=(
+                f"File too large. Maximum size: {upload_service.MAX_FILE_SIZE // (1024 * 1024)} MB."
+            ),
         )
     if len(data) == 0:
         raise HTTPException(
@@ -76,10 +78,16 @@ async def upload_audio(
 
     # Upload to S3
     import asyncio
+
     from lofty.services.storage import storage_client
 
     storage_key = f"uploads/{user.id}/{uuid.uuid4().hex}.{audio_format}"
-    content_type_map = {"wav": "audio/wav", "mp3": "audio/mpeg", "flac": "audio/flac", "ogg": "audio/ogg"}
+    content_type_map = {
+        "wav": "audio/wav",
+        "mp3": "audio/mpeg",
+        "flac": "audio/flac",
+        "ogg": "audio/ogg",
+    }
     await asyncio.to_thread(
         storage_client.upload_bytes,
         storage_key,
@@ -129,6 +137,7 @@ async def list_uploads(
 
     # Sync pending analysis results from Redis (for Colab workers)
     from lofty.services.result_sync import sync_upload_analysis
+
     for upload in uploads:
         if upload.analysis is None:
             await sync_upload_analysis(db, upload)
@@ -155,6 +164,7 @@ async def get_upload(
 
     # Sync analysis result from Redis (for Colab workers)
     from lofty.services.result_sync import sync_upload_analysis
+
     await sync_upload_analysis(db, upload)
 
     return UploadResponse.model_validate(upload)
@@ -168,6 +178,7 @@ async def delete_upload(
 ) -> None:
     """Delete an audio upload."""
     import asyncio
+
     from lofty.services.storage import storage_client
 
     upload = await upload_service.get_upload(db, str(upload_id), user)

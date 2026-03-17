@@ -51,6 +51,7 @@ async def list_finetune_jobs(
 
     # Sync active job results from Redis (for Colab workers)
     from lofty.services.result_sync import sync_finetune_result
+
     for job in jobs:
         if job.status not in ("completed", "failed", "cancelled"):
             await sync_finetune_result(db, job)
@@ -77,6 +78,7 @@ async def get_finetune_job(
 
     # Sync result from Redis (for Colab workers that don't write to DB)
     from lofty.services.result_sync import sync_finetune_result
+
     await sync_finetune_result(db, job)
     await db.refresh(job)
 

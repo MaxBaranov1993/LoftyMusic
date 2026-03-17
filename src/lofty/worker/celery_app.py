@@ -10,6 +10,7 @@ celery_app = Celery("lofty")
 _broker_ssl = {}
 if settings.celery_broker_url.startswith("rediss://"):
     import ssl
+
     _broker_ssl = {
         "broker_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},
         "redis_backend_use_ssl": {"ssl_cert_reqs": ssl.CERT_NONE},

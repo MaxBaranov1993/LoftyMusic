@@ -23,16 +23,16 @@ SCALES = {
 # Chord progressions as scale-degree indices (0-based)
 PROGRESSIONS = {
     "major": [
-        [0, 3, 4, 0],    # I-IV-V-I
-        [0, 4, 5, 3],    # I-V-vi-IV
-        [0, 5, 3, 4],    # I-vi-IV-V
-        [0, 3, 0, 4],    # I-IV-I-V
+        [0, 3, 4, 0],  # I-IV-V-I
+        [0, 4, 5, 3],  # I-V-vi-IV
+        [0, 5, 3, 4],  # I-vi-IV-V
+        [0, 3, 0, 4],  # I-IV-I-V
     ],
     "minor": [
-        [0, 3, 6, 4],    # i-iv-VII-v
-        [0, 5, 3, 6],    # i-vi-iv-VII
-        [0, 6, 5, 4],    # i-VII-vi-v
-        [0, 3, 4, 0],    # i-iv-v-i
+        [0, 3, 6, 4],  # i-iv-VII-v
+        [0, 5, 3, 6],  # i-vi-iv-VII
+        [0, 6, 5, 4],  # i-VII-vi-v
+        [0, 3, 4, 0],  # i-iv-v-i
     ],
 }
 
@@ -70,6 +70,7 @@ GENRE_HINTS = {
 # Waveform generators
 # ---------------------------------------------------------------------------
 
+
 def _sine(phase: np.ndarray) -> np.ndarray:
     return np.sin(phase)
 
@@ -98,6 +99,7 @@ WAVE_FUNCS = {
 # ADSR envelope
 # ---------------------------------------------------------------------------
 
+
 def _adsr_envelope(
     n_samples: int,
     sample_rate: int,
@@ -112,12 +114,14 @@ def _adsr_envelope(
     r = int(sample_rate * release_ms / 1000)
     s = max(0, n_samples - a - d - r)
 
-    env = np.concatenate([
-        np.linspace(0, 1, a, endpoint=False),
-        np.linspace(1, sustain_level, d, endpoint=False),
-        np.full(s, sustain_level),
-        np.linspace(sustain_level, 0, r, endpoint=True),
-    ])
+    env = np.concatenate(
+        [
+            np.linspace(0, 1, a, endpoint=False),
+            np.linspace(1, sustain_level, d, endpoint=False),
+            np.full(s, sustain_level),
+            np.linspace(sustain_level, 0, r, endpoint=True),
+        ]
+    )
     # Trim or pad to exact length
     if len(env) > n_samples:
         env = env[:n_samples]
@@ -130,6 +134,7 @@ def _adsr_envelope(
 # Note frequency helper
 # ---------------------------------------------------------------------------
 
+
 def _midi_to_freq(midi_note: int) -> float:
     """Convert MIDI note number to frequency in Hz."""
     return 440.0 * (2.0 ** ((midi_note - 69) / 12.0))
@@ -138,6 +143,7 @@ def _midi_to_freq(midi_note: int) -> float:
 # ---------------------------------------------------------------------------
 # Prompt analysis
 # ---------------------------------------------------------------------------
+
 
 def _parse_prompt(prompt: str, rng: np.random.Generator) -> dict:
     """Extract musical parameters from prompt text."""
@@ -184,6 +190,7 @@ def _parse_prompt(prompt: str, rng: np.random.Generator) -> dict:
 # Layer renderers
 # ---------------------------------------------------------------------------
 
+
 def _render_note(
     freq: float,
     duration_samples: int,
@@ -226,10 +233,13 @@ def _render_bass(
         root_freq = _midi_to_freq(chord[0] - 12)  # One octave down
         note_len = min(samples_per_chord, len(audio) - pos)
         note = _render_note(
-            root_freq, note_len, sample_rate, _sine,
+            root_freq,
+            note_len,
+            sample_rate,
+            _sine,
             adsr_params={"attack_ms": 20, "decay_ms": 100, "sustain_level": 0.7, "release_ms": 80},
         )
-        audio[pos:pos + note_len] += note
+        audio[pos : pos + note_len] += note
         pos += samples_per_chord
         chord_idx += 1
 
@@ -257,10 +267,18 @@ def _render_chords(
         for midi_note in chord:
             freq = _midi_to_freq(midi_note)
             note = _render_note(
-                freq, note_len, sample_rate, wave_func,
-                adsr_params={"attack_ms": 80, "decay_ms": 150, "sustain_level": 0.5, "release_ms": 120},
+                freq,
+                note_len,
+                sample_rate,
+                wave_func,
+                adsr_params={
+                    "attack_ms": 80,
+                    "decay_ms": 150,
+                    "sustain_level": 0.5,
+                    "release_ms": 120,
+                },
             )
-            audio[pos:pos + note_len] += note * (1.0 / len(chord))
+            audio[pos : pos + note_len] += note * (1.0 / len(chord))
 
         pos += samples_per_chord
         chord_idx += 1
@@ -284,7 +302,7 @@ def _render_melody(
     for midi_note, dur_beats in melody_notes:
         actual_dur = dur_beats * beat_duration
         if swing > 0 and not is_even:
-            actual_dur *= (1.0 - swing * 0.5)
+            actual_dur *= 1.0 - swing * 0.5
 
         note_samples = int(actual_dur * sample_rate)
         if pos + note_samples > len(audio):
@@ -295,12 +313,20 @@ def _render_melody(
         if midi_note > 0:  # 0 = rest
             freq = _midi_to_freq(midi_note)
             note = _render_note(
-                freq, note_samples, sample_rate, wave_func,
-                adsr_params={"attack_ms": 15, "decay_ms": 60, "sustain_level": 0.55, "release_ms": 50},
+                freq,
+                note_samples,
+                sample_rate,
+                wave_func,
+                adsr_params={
+                    "attack_ms": 15,
+                    "decay_ms": 60,
+                    "sustain_level": 0.55,
+                    "release_ms": 50,
+                },
                 vibrato_hz=4.5,
                 vibrato_depth=0.02,
             )
-            audio[pos:pos + note_samples] += note
+            audio[pos : pos + note_samples] += note
 
         pos += note_samples
         is_even = not is_even
@@ -311,6 +337,7 @@ def _render_melody(
 # ---------------------------------------------------------------------------
 # Melody generation
 # ---------------------------------------------------------------------------
+
 
 def _generate_melody_sequence(
     rng: np.random.Generator,
@@ -357,6 +384,7 @@ def _generate_melody_sequence(
 # Chord progression builder
 # ---------------------------------------------------------------------------
 
+
 def _build_chord_notes(
     rng: np.random.Generator,
     scale: list[int],
@@ -385,6 +413,7 @@ def _build_chord_notes(
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
+
 
 def generate_procedural_music(
     prompt: str,
@@ -415,9 +444,30 @@ def generate_procedural_music(
     melody_seq = _generate_melody_sequence(rng, scale, root_midi, duration_seconds, bpm)
 
     # Render layers
-    bass = _render_bass(t_total, sample_rate, chord_notes, beat_duration, beats_per_chord, duration_seconds)
-    chords = _render_chords(t_total, sample_rate, chord_notes, beat_duration, beats_per_chord, _triangle)
-    lead = _render_melody(t_total, sample_rate, melody_seq, beat_duration, wave_func, params["swing"])
+    bass = _render_bass(
+        t_total,
+        sample_rate,
+        chord_notes,
+        beat_duration,
+        beats_per_chord,
+        duration_seconds,
+    )
+    chords = _render_chords(
+        t_total,
+        sample_rate,
+        chord_notes,
+        beat_duration,
+        beats_per_chord,
+        _triangle,
+    )
+    lead = _render_melody(
+        t_total,
+        sample_rate,
+        melody_seq,
+        beat_duration,
+        wave_func,
+        params["swing"],
+    )
 
     # Mix layers
     audio = 0.30 * bass + 0.25 * chords + 0.35 * lead
@@ -428,7 +478,7 @@ def generate_procedural_music(
         reverb = np.zeros_like(audio)
         reverb[delay_samples:] += audio[:-delay_samples] * 0.2
         if 2 * delay_samples < len(audio):
-            reverb[2 * delay_samples:] += audio[:-2 * delay_samples] * 0.1
+            reverb[2 * delay_samples :] += audio[: -2 * delay_samples] * 0.1
         audio += reverb
 
     # Apply fade in/out

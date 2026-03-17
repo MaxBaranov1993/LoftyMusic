@@ -64,7 +64,8 @@ def _heartbeat():
 threading.Thread(target=_heartbeat, daemon=True).start()
 
 # Start Celery worker
-!celery -A lofty.worker.celery_app worker --pool=solo --queues gpu,training --concurrency 1 --loglevel info
+!celery -A lofty.worker.celery_app worker \
+  --pool=solo --queues gpu,training --concurrency 1 --loglevel info
 """
 
 

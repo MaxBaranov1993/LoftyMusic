@@ -1,8 +1,5 @@
 """Upload service: audio file upload and management."""
 
-import math
-import uuid
-
 import structlog
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,9 +87,7 @@ async def list_uploads(
         .limit(per_page)
     )
     count_query = (
-        select(func.count())
-        .select_from(AudioUpload)
-        .where(AudioUpload.user_id == user.id)
+        select(func.count()).select_from(AudioUpload).where(AudioUpload.user_id == user.id)
     )
 
     result = await db.execute(query)
@@ -116,22 +111,16 @@ async def delete_upload(
 
     # Delete referencing dataset tracks first and flush to DB
     # before deleting the upload (FK constraint)
-    await db.execute(
-        delete(DatasetTrack).where(DatasetTrack.upload_id == upload.id)
-    )
+    await db.execute(delete(DatasetTrack).where(DatasetTrack.upload_id == upload.id))
     await db.flush()
 
     # Update dataset track counts
     from lofty.models.dataset import Dataset
 
-    datasets_result = await db.execute(
-        select(Dataset).where(Dataset.user_id == user.id)
-    )
+    datasets_result = await db.execute(select(Dataset).where(Dataset.user_id == user.id))
     for ds in datasets_result.scalars().all():
         count_result = await db.execute(
-            select(func.count())
-            .select_from(DatasetTrack)
-            .where(DatasetTrack.dataset_id == ds.id)
+            select(func.count()).select_from(DatasetTrack).where(DatasetTrack.dataset_id == ds.id)
         )
         ds.num_tracks = count_result.scalar_one()
 

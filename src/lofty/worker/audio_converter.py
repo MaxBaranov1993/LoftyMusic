@@ -22,11 +22,16 @@ def wav_to_mp3(wav_bytes: bytes, bitrate: str = "320k") -> bytes | None:
 
         result = subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-i", str(wav_path),
-                "-codec:a", "libmp3lame",
-                "-b:a", bitrate,
-                "-q:a", "2",
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(wav_path),
+                "-codec:a",
+                "libmp3lame",
+                "-b:a",
+                bitrate,
+                "-q:a",
+                "2",
                 str(mp3_path),
             ],
             capture_output=True,

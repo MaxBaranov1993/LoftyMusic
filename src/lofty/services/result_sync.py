@@ -6,7 +6,7 @@ to PostgreSQL. Called from SSE and job polling endpoints.
 """
 
 import json
-import uuid
+from datetime import UTC
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,9 +35,10 @@ async def sync_job_result(db: AsyncSession, job: GenerationJob) -> bool:
         # Also check job_status for running state update
         status_raw = await redis.get(f"job_status:{job.id}")
         if status_raw == "running" and job.status != JobStatus.RUNNING.value:
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             job.status = JobStatus.RUNNING.value
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(UTC)
             await db.commit()
             return True
         return False
@@ -47,8 +48,9 @@ async def sync_job_result(db: AsyncSession, job: GenerationJob) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+
+    now = datetime.now(UTC)
 
     if result.get("status") == "completed":
         # Create Track record if not already created
@@ -121,9 +123,10 @@ async def sync_finetune_result(db: AsyncSession, job) -> bool:
         # Check for running status or progress update
         status_raw = await redis.get(f"finetune_status:{job.id}")
         if status_raw == "running" and job.status != "running":
-            from datetime import datetime, timezone
+            from datetime import datetime
+
             job.status = "running"
-            job.started_at = datetime.now(timezone.utc)
+            job.started_at = datetime.now(UTC)
             await db.commit()
             return True
 
@@ -143,8 +146,9 @@ async def sync_finetune_result(db: AsyncSession, job) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
 
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
+    from datetime import datetime
+
+    now = datetime.now(UTC)
 
     if result.get("status") == "completed":
         # Create LoRAAdapter record if not already created
@@ -260,6 +264,7 @@ async def sync_dataset_result(db: AsyncSession, dataset) -> bool:
         return False
 
     from sqlalchemy import select
+
     from lofty.models.dataset import DatasetTrack
 
     if result.get("status") == "ready":
@@ -270,9 +275,7 @@ async def sync_dataset_result(db: AsyncSession, dataset) -> bool:
             if not track_id:
                 continue
 
-            db_result = await db.execute(
-                select(DatasetTrack).where(DatasetTrack.id == track_id)
-            )
+            db_result = await db.execute(select(DatasetTrack).where(DatasetTrack.id == track_id))
             track = db_result.scalar_one_or_none()
             if track is None:
                 continue

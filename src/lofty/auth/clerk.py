@@ -31,11 +31,7 @@ async def fetch_jwks(jwks_url: str, force_refresh: bool = False) -> dict:
     global _jwks_cache, _jwks_cache_time
 
     now = time.time()
-    if (
-        not force_refresh
-        and _jwks_cache is not None
-        and (now - _jwks_cache_time) < JWKS_CACHE_TTL
-    ):
+    if not force_refresh and _jwks_cache is not None and (now - _jwks_cache_time) < JWKS_CACHE_TTL:
         return _jwks_cache
 
     async with _jwks_lock:

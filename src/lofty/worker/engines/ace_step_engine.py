@@ -15,7 +15,7 @@ import logging
 import os
 import random
 import tempfile
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -81,6 +81,7 @@ class AceStepEngine(MusicEngine):
             use_compile = False
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     cap = torch.cuda.get_device_capability()
                     use_flash = cap[0] >= 7  # sm_75+ (T4, A100, etc.)
@@ -134,6 +135,7 @@ class AceStepEngine(MusicEngine):
         self._mock_mode = False
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except ImportError:
@@ -184,9 +186,7 @@ class AceStepEngine(MusicEngine):
 
         for attempt in range(_MAX_NAN_RETRIES):
             try:
-                return self._generate_real(
-                    prompt, duration_seconds, on_progress, **params
-                )
+                return self._generate_real(prompt, duration_seconds, on_progress, **params)
             except RuntimeError as e:
                 error_str = str(e).lower()
                 if "nan" not in error_str and "failed" not in error_str:
@@ -195,7 +195,9 @@ class AceStepEngine(MusicEngine):
                 new_seed = random.randint(0, 999999)
                 logger.warning(
                     "Generation attempt %d failed: %s. Retrying with seed=%d",
-                    attempt + 1, e, new_seed,
+                    attempt + 1,
+                    e,
+                    new_seed,
                 )
                 params["seed"] = new_seed
 
@@ -204,9 +206,7 @@ class AceStepEngine(MusicEngine):
                     logger.warning("Dropping lyrics for instrumental fallback")
                     params["lyrics"] = ""
 
-        raise RuntimeError(
-            f"Generation failed after {_MAX_NAN_RETRIES} retries: {last_error}"
-        )
+        raise RuntimeError(f"Generation failed after {_MAX_NAN_RETRIES} retries: {last_error}")
 
     def _generate_real(
         self,
@@ -229,7 +229,10 @@ class AceStepEngine(MusicEngine):
 
         logger.info(
             "ACE-Step generating: task=%s, duration=%.1fs, steps=%d, guidance=%.1f",
-            task_type, duration_seconds, inference_steps, guidance_scale,
+            task_type,
+            duration_seconds,
+            inference_steps,
+            guidance_scale,
         )
 
         if on_progress:
@@ -301,7 +304,9 @@ class AceStepEngine(MusicEngine):
 
         logger.info(
             "ACE-Step generated %.1fs %s audio at %dHz",
-            actual_duration, "stereo" if n_channels == 2 else "mono", output_sr,
+            actual_duration,
+            "stereo" if n_channels == 2 else "mono",
+            output_sr,
         )
 
         return wav_bytes, output_sr, actual_duration
@@ -341,6 +346,7 @@ class AceStepEngine(MusicEngine):
         """Load audio from a file path returned by ACE-Step."""
         try:
             import soundfile as sf
+
             audio, sr = sf.read(path)
             # soundfile returns (samples, channels) — transpose to (channels, samples)
             if audio.ndim == 2:
@@ -348,6 +354,7 @@ class AceStepEngine(MusicEngine):
             return audio, sr
         except ImportError:
             import scipy.io.wavfile as wavfile
+
             sr, audio = wavfile.read(path)
             audio = audio.astype(np.float64) / 32768.0
             if audio.ndim == 2:

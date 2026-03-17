@@ -125,6 +125,7 @@ async def get_job(
     # Sync results from Redis → DB (for remote workers that don't have DB access)
     if job.status not in ("completed", "failed", "cancelled"):
         from lofty.services.result_sync import sync_job_result
+
         synced = await sync_job_result(db, job)
         if synced:
             # Re-read with track loaded

@@ -91,6 +91,7 @@ def create_app() -> FastAPI:
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         import traceback
+
         logger = structlog.get_logger()
         tb = traceback.format_exc()
         logger.error(

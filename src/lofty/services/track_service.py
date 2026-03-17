@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from lofty.models.track import Track
 from lofty.models.user import User
-from lofty.services.storage import storage_client
 
 # Re-export from canonical location to avoid breaking existing imports
 from lofty.services.job_service import calculate_pages  # noqa: F401
+from lofty.services.storage import storage_client
 
 
 async def get_track(
@@ -58,4 +58,5 @@ async def get_download_url(track: Track) -> str:
     the async event loop.
     """
     import asyncio
+
     return await asyncio.to_thread(storage_client.generate_presigned_url, track.storage_key)

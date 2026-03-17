@@ -47,6 +47,7 @@ async def list_datasets(
 
     # Sync processing results from Redis (for Colab workers)
     from lofty.services.result_sync import sync_dataset_result
+
     for ds in datasets:
         if ds.status == "processing":
             await sync_dataset_result(db, ds)
@@ -74,6 +75,7 @@ async def get_dataset(
     # Sync processing result from Redis (for Colab workers)
     if dataset.status == "processing":
         from lofty.services.result_sync import sync_dataset_result
+
         await sync_dataset_result(db, dataset)
         await db.refresh(dataset)
 
@@ -93,7 +95,10 @@ async def add_track(
 ) -> DatasetTrackResponse:
     """Add a track to a dataset (links an existing upload)."""
     track = await dataset_service.add_track_to_dataset(
-        db, user, str(dataset_id), track_data,
+        db,
+        user,
+        str(dataset_id),
+        track_data,
     )
     if track is None:
         raise HTTPException(
@@ -115,7 +120,10 @@ async def remove_track(
 ) -> None:
     """Remove a track from a dataset."""
     removed = await dataset_service.remove_track_from_dataset(
-        db, user, str(dataset_id), str(track_id),
+        db,
+        user,
+        str(dataset_id),
+        str(track_id),
     )
     if not removed:
         raise HTTPException(status_code=404, detail="Dataset or track not found")
@@ -155,7 +163,9 @@ async def process_dataset(
     if dataset.status not in ("pending", "failed"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Dataset is '{dataset.status}', can only process 'pending' or 'failed' datasets.",
+            detail=(
+                f"Dataset is '{dataset.status}', can only process 'pending' or 'failed' datasets."
+            ),
         )
 
     dataset.status = "processing"
@@ -187,6 +197,7 @@ async def process_dataset(
                 audio_bytes = await asyncio.to_thread(response["Body"].read)
 
                 import soundfile as sf
+
                 info = sf.info(io.BytesIO(audio_bytes))
                 track.duration_seconds = info.duration
             except Exception:

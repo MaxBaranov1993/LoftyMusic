@@ -1,7 +1,5 @@
 """Fine-tuning service: job management and Celery dispatch."""
 
-import math
-
 import structlog
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -74,22 +72,22 @@ async def create_finetune_job(
 
     track_data = []
     for t in tracks:
-        upload_result = await db.execute(
-            select(AudioUpload).where(AudioUpload.id == t.upload_id)
-        )
+        upload_result = await db.execute(select(AudioUpload).where(AudioUpload.id == t.upload_id))
         upload = upload_result.scalar_one_or_none()
         if upload is None:
             continue
-        track_data.append({
-            "storage_key": upload.storage_key,
-            "original_filename": upload.original_filename,
-            "format": upload.format,
-            "lyrics": t.lyrics or "",
-            "caption": t.caption or "",
-            "bpm": t.bpm,
-            "key_scale": t.key_scale,
-            "duration_seconds": t.duration_seconds,
-        })
+        track_data.append(
+            {
+                "storage_key": upload.storage_key,
+                "original_filename": upload.original_filename,
+                "format": upload.format,
+                "lyrics": t.lyrics or "",
+                "caption": t.caption or "",
+                "bpm": t.bpm,
+                "key_scale": t.key_scale,
+                "duration_seconds": t.duration_seconds,
+            }
+        )
 
     logger.info(
         "finetune_job.creating",
@@ -174,9 +172,7 @@ async def list_finetune_jobs(
         .limit(per_page)
     )
     count_query = (
-        select(func.count())
-        .select_from(FineTuneJob)
-        .where(FineTuneJob.user_id == user.id)
+        select(func.count()).select_from(FineTuneJob).where(FineTuneJob.user_id == user.id)
     )
 
     result = await db.execute(query)
@@ -204,6 +200,7 @@ async def cancel_finetune_job(
     if job.status == "running":
         # Signal cancellation via Redis (worker polls this)
         from lofty.dependencies import get_redis
+
         redis = await get_redis()
         await redis.setex(f"finetune_cancel:{job_id}", 600, "1")
     else:
@@ -264,6 +261,7 @@ async def delete_adapter(
 ) -> bool:
     """Soft-delete an adapter (mark inactive) and clean up S3."""
     import asyncio
+
     from lofty.services.storage import storage_client
 
     adapter = await get_adapter(db, adapter_id, user)

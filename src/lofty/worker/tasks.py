@@ -9,8 +9,7 @@ and the job polling API.
 """
 
 import logging
-import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import redis as _redis
 
@@ -23,8 +22,9 @@ from lofty.worker.generator import detect_engine_type, get_engine
 logger = logging.getLogger(__name__)
 
 
-class GenerationCancelled(Exception):
+class GenerationCancelledError(Exception):
     """Raised when a generation is cancelled via Redis flag."""
+
     def __init__(self, job_id: str):
         self.job_id = job_id
         super().__init__(f"Job {job_id} cancelled by user")
@@ -41,6 +41,7 @@ def _get_redis():
         kwargs: dict = {"decode_responses": True}
         if settings.redis_url.startswith("rediss://"):
             import ssl as _ssl
+
             kwargs["ssl"] = True
             kwargs["ssl_cert_reqs"] = _ssl.CERT_NONE
         _redis_client = _redis.from_url(settings.redis_url, **kwargs)
@@ -61,6 +62,7 @@ def _get_sync_session():
     if _SyncSession is None:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
+
         _sync_engine = create_engine(
             settings.sync_database_url,
             pool_size=5,
@@ -131,7 +133,7 @@ def generate_music(
             # Check cancellation flag
             if r.get(f"job_cancel:{job_id}"):
                 r.delete(f"job_cancel:{job_id}")
-                raise GenerationCancelled(job_id)
+                raise GenerationCancelledError(job_id)
 
         on_progress(0)
 
@@ -224,12 +226,14 @@ def generate_music(
 
         logger.info(
             "Job %s completed: %.1fs audio, %.1fKB",
-            job_id, actual_duration, file_size / 1024,
+            job_id,
+            actual_duration,
+            file_size / 1024,
         )
 
         return result
 
-    except GenerationCancelled:
+    except GenerationCancelledError:
         r.delete(_progress_key(job_id))
         r.setex(_result_key(job_id), 3600, json.dumps({"status": "cancelled"}))
         r.setex(f"job_status:{job_id}", 3600, "cancelled")
@@ -260,24 +264,26 @@ def cleanup_stale_jobs() -> dict:
 
     from lofty.models.job import GenerationJob, JobStatus
 
-    stale_threshold = datetime.now(timezone.utc) - timedelta(minutes=10)
+    stale_threshold = datetime.now(UTC) - timedelta(minutes=10)
 
     try:
         with _get_sync_session() as db:
             result_running = db.execute(
                 update(GenerationJob)
                 .where(
-                    GenerationJob.status.in_([
-                        JobStatus.RUNNING.value,
-                        JobStatus.PENDING.value,
-                        JobStatus.QUEUED.value,
-                    ]),
+                    GenerationJob.status.in_(
+                        [
+                            JobStatus.RUNNING.value,
+                            JobStatus.PENDING.value,
+                            JobStatus.QUEUED.value,
+                        ]
+                    ),
                     GenerationJob.created_at < stale_threshold,
                 )
                 .values(
                     status=JobStatus.FAILED.value,
                     error_message="Job timed out — worker may have crashed. Please try again.",
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(UTC),
                 )
             )
             db.commit()
@@ -419,7 +425,9 @@ def process_dataset(
 
         logger.info(
             "Dataset %s processed: %d/%d tracks",
-            dataset_id, processed_count, len(tracks),
+            dataset_id,
+            processed_count,
+            len(tracks),
         )
         return result
 
@@ -486,7 +494,7 @@ def finetune_model(
             # Check cancellation flag
             if r.get(f"finetune_cancel:{job_id}"):
                 r.delete(f"finetune_cancel:{job_id}")
-                raise GenerationCancelled(job_id)
+                raise GenerationCancelledError(job_id)
 
         on_progress(0)
 
@@ -498,7 +506,9 @@ def finetune_model(
         # Prepare local dataset directory
         temp_dir = tempfile.mkdtemp(prefix="lofty_finetune_")
         dataset_dir = prepare_dataset_directory(
-            track_data, storage_client, temp_dir,
+            track_data,
+            storage_client,
+            temp_dir,
         )
         output_dir = os.path.join(temp_dir, "output")
 
@@ -536,7 +546,9 @@ def finetune_model(
                 with open(fpath, "rb") as f:
                     data = f.read()
                 storage_client.upload_bytes(
-                    s3_key, data, "application/octet-stream",
+                    s3_key,
+                    data,
+                    "application/octet-stream",
                 )
                 adapter_size += len(data)
 
@@ -558,12 +570,13 @@ def finetune_model(
 
         logger.info(
             "Finetune job %s completed: adapter_size=%dKB",
-            job_id, adapter_size // 1024,
+            job_id,
+            adapter_size // 1024,
         )
 
         return result
 
-    except GenerationCancelled:
+    except GenerationCancelledError:
         r.delete(f"finetune_progress:{job_id}")
         r.setex(f"finetune_result:{job_id}", 3600, json.dumps({"status": "cancelled"}))
         r.setex(f"finetune_status:{job_id}", 86400, "cancelled")

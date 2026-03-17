@@ -3,7 +3,8 @@
 from fastapi import APIRouter
 
 from lofty.api.datasets import router as datasets_router
-from lofty.api.finetune import adapters_router, router as finetune_router
+from lofty.api.finetune import adapters_router
+from lofty.api.finetune import router as finetune_router
 from lofty.api.gpu import router as gpu_router
 from lofty.api.jobs import router as jobs_router
 from lofty.api.sse import router as sse_router

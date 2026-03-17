@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from lofty.models.base import Base, UUIDPrimaryKeyMixin
 
 
-class JobStatus(str, enum.Enum):
+class JobStatus(enum.StrEnum):
     PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"

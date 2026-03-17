@@ -4,8 +4,14 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    BigInteger, Boolean, DateTime, Float, ForeignKey,
-    Integer, JSON, String, Text, func,
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,12 +30,14 @@ class FineTuneJob(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(
-        String(20), default="pending", server_default="pending", index=True, nullable=False,
+        String(20),
+        default="pending",
+        server_default="pending",
+        index=True,
+        nullable=False,
     )  # pending, queued, running, completed, failed, cancelled
     config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    compute_mode: Mapped[str] = mapped_column(
-        String(10), nullable=False
-    )
+    compute_mode: Mapped[str] = mapped_column(String(10), nullable=False)
     celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

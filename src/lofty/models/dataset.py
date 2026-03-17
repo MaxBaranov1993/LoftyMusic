@@ -39,8 +39,10 @@ class DatasetTrack(UUIDPrimaryKeyMixin, Base):
     __tablename__ = "dataset_tracks"
 
     dataset_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("datasets.id", ondelete="CASCADE"),
-        index=True, nullable=False,
+        UUID(as_uuid=True),
+        ForeignKey("datasets.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
     )
     upload_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("audio_uploads.id"), nullable=False

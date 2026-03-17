@@ -10,6 +10,7 @@ from lofty.schemas.job import ComputeMode
 
 class FineTuneConfig(BaseModel):
     """Training configuration passed to the worker."""
+
     max_epochs: int = Field(default=500, ge=1, le=5000)
     batch_size: int = Field(default=1, ge=1, le=8)
     training_method: str = Field(default="lokr", pattern=r"^(lora|lokr)$")

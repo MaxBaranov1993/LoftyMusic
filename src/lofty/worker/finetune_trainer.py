@@ -10,7 +10,6 @@ Uses the actual ACE-Step training pipeline:
 import json
 import logging
 import os
-from pathlib import Path
 
 from lofty.config import settings
 
@@ -142,7 +141,7 @@ class FineTuneTrainer:
             kwargs = {"labeled": True}
             if meta_path:
                 try:
-                    with open(meta_path, "r", encoding="utf-8") as f:
+                    with open(meta_path, encoding="utf-8") as f:
                         meta = json.load(f)
                     if meta.get("caption"):
                         kwargs["caption"] = meta["caption"]
@@ -160,7 +159,7 @@ class FineTuneTrainer:
                     lyrics_path = f"{base}{lyrics_ext}"
                     if os.path.exists(lyrics_path):
                         try:
-                            with open(lyrics_path, "r", encoding="utf-8") as f:
+                            with open(lyrics_path, encoding="utf-8") as f:
                                 lyrics_text = f.read().strip()
                             if lyrics_text:
                                 kwargs["lyrics"] = lyrics_text
@@ -288,12 +287,15 @@ class FineTuneTrainer:
 
         config_path = os.path.join(self.output_dir, "adapter_config.json")
         with open(config_path, "w") as f:
-            json.dump({
-                "method": self.training_method,
-                "base_model": settings.ace_step_model_path,
-                "epochs": self.max_epochs,
-                "mock": True,
-            }, f)
+            json.dump(
+                {
+                    "method": self.training_method,
+                    "base_model": settings.ace_step_model_path,
+                    "epochs": self.max_epochs,
+                    "mock": True,
+                },
+                f,
+            )
 
         logger.info("Mock training complete: %s", self.output_dir)
         return self.output_dir

@@ -23,7 +23,7 @@ import math
 import os
 import re
 import tempfile
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -120,6 +120,7 @@ class YuEEngine(MusicEngine):
     def _load_tokenizer_and_codec(self) -> None:
         """Load the MM tokenizer and xcodec model (lightweight, always needed)."""
         import sys
+
         import torch
         from omegaconf import OmegaConf
 
@@ -156,8 +157,6 @@ class YuEEngine(MusicEngine):
         )
 
         if os.path.exists(xcodec_config_path):
-            from models.soundstream_hubert_new import SoundStream
-
             device = torch.device(self.device if torch.cuda.is_available() else "cpu")
             model_config = OmegaConf.load(xcodec_config_path)
             self._codec_model = eval(model_config.generator.name)(
@@ -177,6 +176,7 @@ class YuEEngine(MusicEngine):
         """
         try:
             import torch
+
             if torch.cuda.is_available():
                 cap = torch.cuda.get_device_capability()
                 if cap[0] >= 8:
@@ -184,6 +184,7 @@ class YuEEngine(MusicEngine):
             return torch.float16
         except Exception:
             import torch
+
             return torch.float16
 
     def _load_stage1(self, model_id: str) -> None:
@@ -203,7 +204,12 @@ class YuEEngine(MusicEngine):
 
         device = torch.device(self.device if torch.cuda.is_available() else "cpu")
         dtype = self._get_optimal_dtype()
-        logger.info("Loading YuE Stage 1 model: %s (4bit=%s, dtype=%s)", model_id, self.use_4bit, dtype)
+        logger.info(
+            "Loading YuE Stage 1 model: %s (4bit=%s, dtype=%s)",
+            model_id,
+            self.use_4bit,
+            dtype,
+        )
 
         load_kwargs = {
             "torch_dtype": dtype,
@@ -213,6 +219,7 @@ class YuEEngine(MusicEngine):
         # Use flash attention if available
         try:
             import flash_attn  # noqa: F401
+
             load_kwargs["attn_implementation"] = "flash_attention_2"
         except ImportError:
             logger.info("flash-attn not available, using default attention")
@@ -256,6 +263,7 @@ class YuEEngine(MusicEngine):
 
         try:
             import flash_attn  # noqa: F401
+
             load_kwargs["attn_implementation"] = "flash_attention_2"
         except ImportError:
             pass
@@ -337,12 +345,8 @@ class YuEEngine(MusicEngine):
         on_progress: Callable[[int], None] | None = None,
         **params,
     ) -> tuple[bytes, int, float]:
-        import copy
-        import random
-        from collections import Counter
 
         import torch
-        import torchaudio
         from einops import rearrange
         from transformers import LogitsProcessor, LogitsProcessorList
 
@@ -364,8 +368,13 @@ class YuEEngine(MusicEngine):
         logger.info(
             "YuE generating: segments=%d, duration=%.1fs, temp=%.2f, top_p=%.2f, "
             "rep_penalty=%.2f, max_tokens=%d, lang=%s",
-            num_segments, duration_seconds, temperature, top_p,
-            repetition_penalty, max_new_tokens, language,
+            num_segments,
+            duration_seconds,
+            temperature,
+            top_p,
+            repetition_penalty,
+            max_new_tokens,
+            language,
         )
 
         # Seed
@@ -390,7 +399,8 @@ class YuEEngine(MusicEngine):
         # Build prompt texts (YuE format)
         genres = prompt.strip()
         prompt_texts = [
-            f"Generate music from the given lyrics segment by segment.\n[Genre] {genres}\n{full_lyrics}"
+            f"Generate music from the given lyrics segment by segment.\n"
+            f"[Genre] {genres}\n{full_lyrics}"
         ]
         prompt_texts += lyrics_segments
 
@@ -414,8 +424,8 @@ class YuEEngine(MusicEngine):
         raw_output = None
 
         for i in range(1, run_n):
-            section_text = prompt_texts[i].replace("[start_of_segment]", "").replace(
-                "[end_of_segment]", ""
+            section_text = (
+                prompt_texts[i].replace("[start_of_segment]", "").replace("[end_of_segment]", "")
             )
 
             if i == 1:
@@ -437,9 +447,7 @@ class YuEEngine(MusicEngine):
                 )
 
             prompt_ids_t = torch.as_tensor(prompt_ids).unsqueeze(0).to(device)
-            input_ids = (
-                torch.cat([raw_output, prompt_ids_t], dim=1) if i > 1 else prompt_ids_t
-            )
+            input_ids = torch.cat([raw_output, prompt_ids_t], dim=1) if i > 1 else prompt_ids_t
 
             # Window slicing for context limit
             max_context = 16384 - max_new_tokens - 1
@@ -491,9 +499,7 @@ class YuEEngine(MusicEngine):
         eoa_idx = np.where(ids == mmtok.eoa)[0].tolist()
 
         if len(soa_idx) != len(eoa_idx):
-            raise RuntimeError(
-                f"Invalid soa/eoa pairs: {len(soa_idx)} soa vs {len(eoa_idx)} eoa"
-            )
+            raise RuntimeError(f"Invalid soa/eoa pairs: {len(soa_idx)} soa vs {len(eoa_idx)} eoa")
 
         vocals_list = []
         instrumentals_list = []
@@ -502,12 +508,8 @@ class YuEEngine(MusicEngine):
             if len(codec_ids) > 0 and codec_ids[0] == 32016:
                 codec_ids = codec_ids[1:]
             codec_ids = codec_ids[: 2 * (codec_ids.shape[0] // 2)]
-            vocals_ids = codectool.ids2npy(
-                rearrange(codec_ids, "(n b) -> b n", b=2)[0]
-            )
-            instrumentals_ids = codectool.ids2npy(
-                rearrange(codec_ids, "(n b) -> b n", b=2)[1]
-            )
+            vocals_ids = codectool.ids2npy(rearrange(codec_ids, "(n b) -> b n", b=2)[0])
+            instrumentals_ids = codectool.ids2npy(rearrange(codec_ids, "(n b) -> b n", b=2)[1])
             vocals_list.append(vocals_ids)
             instrumentals_list.append(instrumentals_ids)
 
@@ -549,9 +551,7 @@ class YuEEngine(MusicEngine):
                 codec_result = np.load(npy_path)
                 with torch.no_grad():
                     decoded = self._codec_model.decode(
-                        torch.as_tensor(
-                            codec_result.astype(np.int16), dtype=torch.long
-                        )
+                        torch.as_tensor(codec_result.astype(np.int16), dtype=torch.long)
                         .unsqueeze(0)
                         .permute(1, 0, 2)
                         .to(codec_device)
@@ -582,9 +582,7 @@ class YuEEngine(MusicEngine):
             # xcodec outputs at 16kHz — try to upsample via vocoder if available
             sample_rate = 16000
             try:
-                mixed_np, sample_rate = self._upsample_vocoder(
-                    stage2_results, tmpdir, codec_device
-                )
+                mixed_np, sample_rate = self._upsample_vocoder(stage2_results, tmpdir, codec_device)
                 if on_progress:
                     on_progress(95)
             except Exception as e:
@@ -602,7 +600,9 @@ class YuEEngine(MusicEngine):
 
         logger.info(
             "YuE generated %.1fs audio at %dHz (%d channels)",
-            actual_duration, sample_rate, n_channels,
+            actual_duration,
+            sample_rate,
+            n_channels,
         )
 
         return wav_bytes, sample_rate, actual_duration
@@ -618,7 +618,6 @@ class YuEEngine(MusicEngine):
         import copy
         from collections import Counter
 
-        import torch
         from transformers import LogitsProcessorList
 
         class BlockTokenRangeProcessor:
@@ -630,7 +629,6 @@ class YuEEngine(MusicEngine):
                 return scores
 
         mmtok = self._mmtokenizer
-        codectool = self._codectool
         codectool_s2 = self._codectool_stage2
         device = next(self._stage2_model.parameters()).device
 
@@ -659,9 +657,7 @@ class YuEEngine(MusicEngine):
                 )
             else:
                 segments = []
-                num_segs = (num_batch // batch_size) + (
-                    1 if num_batch % batch_size != 0 else 0
-                )
+                num_segs = (num_batch // batch_size) + (1 if num_batch % batch_size != 0 else 0)
                 for seg in range(num_segs):
                     start = seg * batch_size * 300
                     end = min((seg + 1) * batch_size * 300, output_duration * 50)
@@ -852,7 +848,9 @@ class YuEEngine(MusicEngine):
                 mixed_np = mixed_np[np.newaxis, :]
             return mixed_np, 44100
         elif vocal_output is not None:
-            mixed_np = vocal_output.numpy() if hasattr(vocal_output, "numpy") else np.array(vocal_output)
+            mixed_np = (
+                vocal_output.numpy() if hasattr(vocal_output, "numpy") else np.array(vocal_output)
+            )
             if mixed_np.ndim == 1:
                 mixed_np = mixed_np[np.newaxis, :]
             return mixed_np, 44100

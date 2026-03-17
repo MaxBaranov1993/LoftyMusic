@@ -4,14 +4,14 @@ import re
 import unicodedata
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lofty.schemas.track import TrackResponse
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"
@@ -20,12 +20,12 @@ class JobStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ComputeMode(str, Enum):
+class ComputeMode(StrEnum):
     CPU = "cpu"
     GPU = "gpu"
 
 
-class QualityPreset(str, Enum):
+class QualityPreset(StrEnum):
     DRAFT = "draft"
     BALANCED = "balanced"
     HIGH = "high"
@@ -138,9 +138,7 @@ class JobCreate(BaseModel):
     def validate_compute_mode(self):
         """YuE requires GPU — CPU mode would produce only mock/silent output."""
         if self.model_name == "yue" and self.compute_mode == ComputeMode.CPU:
-            raise ValueError(
-                "YuE requires a GPU. CPU mode is not supported for YuE."
-            )
+            raise ValueError("YuE requires a GPU. CPU mode is not supported for YuE.")
         return self
 
 

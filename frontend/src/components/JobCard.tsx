@@ -19,6 +19,8 @@ import {
   Ban,
   Square,
   Trash2,
+  Cpu,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Equalizer } from "@/components/Equalizer";
@@ -29,43 +31,34 @@ const STATUS_CONFIG: Record<
 > = {
   pending: {
     icon: Clock,
-    className: "bg-amber-100 text-amber-700 border-amber-200",
+    className: "bg-amber-500/15 text-amber-400 border-amber-500/25",
     label: "Pending",
   },
   queued: {
     icon: ListOrdered,
-    className: "bg-secondary/15 text-secondary border-secondary/30",
+    className: "bg-[#B3B3B3]/15 text-[#B3B3B3] border-[#B3B3B3]/25",
     label: "Queued",
   },
   running: {
     icon: Loader2,
-    className: "bg-primary/15 text-primary border-primary/30",
+    className: "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/25",
     label: "Running",
   },
   completed: {
     icon: CheckCircle2,
-    className: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    className: "bg-[#1DB954]/15 text-[#1DB954] border-[#1DB954]/25",
     label: "Completed",
   },
   failed: {
     icon: XCircle,
-    className: "bg-red-100 text-red-700 border-red-200",
+    className: "bg-red-500/15 text-red-400 border-red-500/25",
     label: "Failed",
   },
   cancelled: {
     icon: Ban,
-    className: "bg-gray-100 text-gray-500 border-gray-200",
+    className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/25",
     label: "Cancelled",
   },
-};
-
-const STATUS_BORDER: Record<string, string> = {
-  pending: "border-l-amber-400",
-  queued: "border-l-secondary",
-  running: "border-l-primary",
-  completed: "border-l-emerald-500",
-  failed: "border-l-red-400",
-  cancelled: "border-l-gray-400",
 };
 
 interface Props {
@@ -110,8 +103,7 @@ export default function JobCard({ job, onCancelled, onDeleted }: Props) {
   return (
     <Card
       className={cn(
-        "animate-slide-up border-l-4 overflow-hidden transition-shadow duration-200 hover:shadow-md",
-        STATUS_BORDER[job.status] || "border-l-gray-300"
+        "animate-slide-up overflow-hidden transition-all duration-200 hover:bg-[#282828] hover:scale-[1.01]"
       )}
     >
       <CardContent className="py-4">
@@ -119,10 +111,25 @@ export default function JobCard({ job, onCancelled, onDeleted }: Props) {
           <div className="flex-1 min-w-0">
             <p className="font-medium text-foreground truncate">{job.prompt}</p>
             <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+              <Badge variant="outline" className={cn(
+                "text-[10px] px-1.5 py-0",
+                job.model_name === "yue"
+                  ? "border-purple-500/40 text-purple-400"
+                  : "border-[#1DB954]/40 text-[#1DB954]"
+              )}>
+                {job.model_name === "yue" ? "YuE" : "ACE-Step"}
+              </Badge>
+              <Badge variant="outline" className={cn(
+                "text-[10px] px-1.5 py-0 gap-0.5",
+                job.compute_mode === "cpu"
+                  ? "border-blue-500/40 text-blue-400"
+                  : "border-amber-500/40 text-amber-400"
+              )}>
+                {job.compute_mode === "cpu" ? <Cpu className="w-2.5 h-2.5" /> : <Zap className="w-2.5 h-2.5" />}
+                {job.compute_mode === "cpu" ? "CPU" : "GPU"}
+              </Badge>
               <span>{job.duration_seconds}s</span>
-              <span className="text-border">|</span>
-              <span>{job.model_name}</span>
-              <span className="text-border">|</span>
+              <span className="text-zinc-600">|</span>
               <span>{createdAt}</span>
             </div>
           </div>
@@ -148,7 +155,7 @@ export default function JobCard({ job, onCancelled, onDeleted }: Props) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-red-500"
+                className="h-7 w-7 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
                 onClick={handleCancel}
                 disabled={cancelling}
                 title="Stop"
@@ -165,7 +172,7 @@ export default function JobCard({ job, onCancelled, onDeleted }: Props) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-red-500"
+                className="h-7 w-7 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
                 onClick={handleDelete}
                 disabled={deleting}
                 title="Delete"
@@ -225,30 +232,32 @@ function AudioPlayer({
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handlePlay = async () => {
-    if (audioUrl) return;
-    setLoading(true);
-    try {
-      const track = await api.getTrack(trackId);
-      if (track.download_url) {
-        setAudioUrl(track.download_url);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    handlePlay();
+    let cancelled = false;
+
+    async function fetchAudioUrl() {
+      setLoading(true);
+      try {
+        const track = await api.getTrack(trackId);
+        if (!cancelled && track.download_url) {
+          setAudioUrl(track.download_url);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    fetchAudioUrl();
+    return () => { cancelled = true; };
   }, [trackId]);
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl border border-border/40">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          <Music className="w-5 h-5 text-primary" />
+      <div className="flex items-center gap-3 p-3 bg-[#282828] rounded-lg">
+        <div className="w-10 h-10 rounded-lg bg-[#1DB954]/15 flex items-center justify-center shrink-0">
+          <Music className="w-5 h-5 text-[#1DB954]" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium truncate text-foreground">{title}</p>
@@ -261,9 +270,9 @@ function AudioPlayer({
             variant="outline"
             size="sm"
             asChild
-            className="gap-1.5 text-secondary hover:text-secondary border-secondary/30 hover:bg-secondary/5"
+            className="gap-1.5 text-white hover:text-white border-[#727272] hover:bg-[#3e3e3e] hover:border-white"
           >
-            <a href={audioUrl} download={`${title}.wav`}>
+            <a href={audioUrl} download={title}>
               <Download className="w-3.5 h-3.5" />
               Download
             </a>

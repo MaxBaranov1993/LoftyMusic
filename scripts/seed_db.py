@@ -38,8 +38,8 @@ async def seed():
                 status=JobStatus.PENDING,
                 prompt=prompt,
                 duration_seconds=10.0,
-                model_name="musicgen-small",
-                generation_params={"temperature": 1.0, "top_k": 250, "guidance_scale": 3.0},
+                model_name="ace-step-1.5",
+                generation_params={"inference_steps": 50, "guidance_scale": 5.0},
             )
             session.add(job)
 

@@ -22,11 +22,15 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency that yields an async DB session."""
+    """FastAPI dependency that yields an async DB session.
+
+    Services are responsible for calling commit() explicitly.
+    The dependency only handles rollback on unhandled exceptions
+    to avoid double-commit issues.
+    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise

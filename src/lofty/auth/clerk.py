@@ -1,5 +1,6 @@
 """Clerk JWT/JWKS verification and user management."""
 
+import asyncio
 import logging
 import time
 
@@ -18,26 +19,51 @@ logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 
-# JWKS cache
+# JWKS cache — protected by lock to prevent thundering herd on expiry/rotation
 _jwks_cache: dict | None = None
 _jwks_cache_time: float = 0
+_jwks_lock = asyncio.Lock()
 JWKS_CACHE_TTL = 3600  # 1 hour
 
 
-async def fetch_jwks(jwks_url: str) -> dict:
-    """Fetch JWKS keys from Clerk, with caching."""
+async def fetch_jwks(jwks_url: str, force_refresh: bool = False) -> dict:
+    """Fetch JWKS keys from Clerk, with caching and lock protection."""
     global _jwks_cache, _jwks_cache_time
 
     now = time.time()
-    if _jwks_cache is not None and (now - _jwks_cache_time) < JWKS_CACHE_TTL:
+    if (
+        not force_refresh
+        and _jwks_cache is not None
+        and (now - _jwks_cache_time) < JWKS_CACHE_TTL
+    ):
         return _jwks_cache
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(jwks_url, timeout=10.0)
-        response.raise_for_status()
-        _jwks_cache = response.json()
-        _jwks_cache_time = now
-        return _jwks_cache
+    async with _jwks_lock:
+        # Double-check after acquiring lock (another coroutine may have refreshed)
+        now = time.time()
+        if (
+            not force_refresh
+            and _jwks_cache is not None
+            and (now - _jwks_cache_time) < JWKS_CACHE_TTL
+        ):
+            return _jwks_cache
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(jwks_url, timeout=10.0)
+            response.raise_for_status()
+            _jwks_cache = response.json()
+            _jwks_cache_time = time.time()
+            return _jwks_cache
+
+
+def _build_public_keys(jwks_data: dict) -> dict:
+    """Extract public keys from JWKS data, keyed by kid."""
+    keys = {}
+    for key_data in jwks_data.get("keys", []):
+        kid = key_data.get("kid")
+        if kid:
+            keys[kid] = jwt.algorithms.RSAAlgorithm.from_jwk(key_data)
+    return keys
 
 
 async def verify_clerk_token(token: str, app_settings: Settings | None = None) -> dict:
@@ -56,24 +82,14 @@ async def verify_clerk_token(token: str, app_settings: Settings | None = None) -
 
     try:
         jwks_data = await fetch_jwks(app_settings.clerk_jwks_url)
-        public_keys = {}
-        for key_data in jwks_data.get("keys", []):
-            kid = key_data.get("kid")
-            if kid:
-                public_keys[kid] = jwt.algorithms.RSAAlgorithm.from_jwk(key_data)
+        public_keys = _build_public_keys(jwks_data)
 
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         if kid not in public_keys:
             # Try refreshing JWKS once (key rotation)
-            global _jwks_cache
-            _jwks_cache = None
-            jwks_data = await fetch_jwks(app_settings.clerk_jwks_url)
-            public_keys = {}
-            for key_data in jwks_data.get("keys", []):
-                k = key_data.get("kid")
-                if k:
-                    public_keys[k] = jwt.algorithms.RSAAlgorithm.from_jwk(key_data)
+            jwks_data = await fetch_jwks(app_settings.clerk_jwks_url, force_refresh=True)
+            public_keys = _build_public_keys(jwks_data)
 
             if kid not in public_keys:
                 raise HTTPException(
@@ -81,12 +97,26 @@ async def verify_clerk_token(token: str, app_settings: Settings | None = None) -
                     detail="Token signing key not found",
                 )
 
+        decode_options = {"verify_aud": False}
+        decode_kwargs: dict = {}
+
+        # Verify issuer when configured — prevents cross-app token reuse
+        if app_settings.clerk_jwt_issuer:
+            decode_kwargs["issuer"] = app_settings.clerk_jwt_issuer
+        else:
+            decode_options["verify_iss"] = False
+            logger.warning(
+                "CLERK_JWT_ISSUER not configured — issuer verification disabled. "
+                "Set this in production to prevent cross-app token reuse."
+            )
+
         decoded = jwt.decode(
             token,
             key=public_keys[kid],
             algorithms=["RS256"],
-            options={"verify_aud": False},
+            options=decode_options,
             leeway=10,
+            **decode_kwargs,
         )
         return decoded
 

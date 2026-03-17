@@ -1,13 +1,14 @@
 """Track service: queries and presigned URL generation."""
 
-import math
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from lofty.models.track import Track
 from lofty.models.user import User
 from lofty.services.storage import storage_client
+
+# Re-export from canonical location to avoid breaking existing imports
+from lofty.services.job_service import calculate_pages  # noqa: F401
 
 
 async def get_track(
@@ -50,10 +51,11 @@ async def list_tracks(
     return tracks, total
 
 
-def get_download_url(track: Track) -> str:
-    """Generate a presigned download URL for a track."""
-    return storage_client.generate_presigned_url(track.storage_key)
+async def get_download_url(track: Track) -> str:
+    """Generate a presigned download URL for a track.
 
-
-def calculate_pages(total: int, per_page: int) -> int:
-    return max(1, math.ceil(total / per_page))
+    Runs the synchronous boto3 call in a thread to avoid blocking
+    the async event loop.
+    """
+    import asyncio
+    return await asyncio.to_thread(storage_client.generate_presigned_url, track.storage_key)

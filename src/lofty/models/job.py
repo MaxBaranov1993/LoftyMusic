@@ -33,9 +33,16 @@ class GenerationJob(UUIDPrimaryKeyMixin, Base):
         nullable=False,
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    lyrics: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     duration_seconds: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
-    model_name: Mapped[str] = mapped_column(String(100), default="musicgen-small", nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), default="ace-step-1.5", nullable=False)
     generation_params: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    lora_adapter_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("lora_adapters.id"), nullable=True
+    )
+    compute_mode: Mapped[str] = mapped_column(
+        String(10), default="gpu", server_default="gpu", nullable=False
+    )
     celery_task_id: Mapped[str | None] = mapped_column(String(255))
     error_message: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

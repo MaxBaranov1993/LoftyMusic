@@ -71,7 +71,7 @@ export default function TracksPage() {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="border-border/40">
+            <Card key={i}>
               <CardContent className="py-4">
                 <div className="flex items-center gap-4">
                   <Skeleton className="w-12 h-12 rounded-xl shrink-0" />
@@ -88,7 +88,7 @@ export default function TracksPage() {
       ) : tracks.length === 0 ? (
         /* Empty State */
         <div className="text-center py-20 animate-fade-in">
-          <div className="w-20 h-20 rounded-2xl bg-accent/30 border border-accent/50 flex items-center justify-center mx-auto mb-5">
+          <div className="w-20 h-20 rounded-2xl bg-[#282828] flex items-center justify-center mx-auto mb-5">
             <Disc3 className="w-9 h-9 text-primary" />
           </div>
           <h3 className="text-lg font-semibold text-foreground">
@@ -164,11 +164,11 @@ function TrackItem({ track }: { track: Track }) {
   }, [track.id]);
 
   return (
-    <Card className="group border-border/40 hover:border-primary/30 hover:shadow-md transition-all duration-200 animate-slide-up">
+    <Card className="group hover:bg-[#282828] hover:scale-[1.01] transition-all duration-300 animate-slide-up">
       <CardContent className="py-4">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-accent/30 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
-            <Music className="w-5 h-5 text-primary" />
+          <div className="w-12 h-12 rounded-lg bg-[#282828] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform duration-200">
+            <Music className="w-5 h-5 text-[#1DB954]" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-medium text-foreground truncate">
@@ -176,11 +176,11 @@ function TrackItem({ track }: { track: Track }) {
             </p>
             <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
               <span>{track.duration_seconds.toFixed(1)}s</span>
-              <span className="text-border">|</span>
+              <span className="text-zinc-600">|</span>
               <span>{track.sample_rate / 1000}kHz</span>
-              <span className="text-border">|</span>
+              <span className="text-zinc-600">|</span>
               <span>{sizeMb} MB</span>
-              <span className="text-border hidden sm:inline">|</span>
+              <span className="text-zinc-600 hidden sm:inline">|</span>
               <span className="hidden sm:inline">{createdAt}</span>
             </div>
           </div>
@@ -189,9 +189,9 @@ function TrackItem({ track }: { track: Track }) {
               variant="outline"
               size="sm"
               asChild
-              className="gap-1.5 text-secondary hover:text-secondary border-secondary/30 hover:bg-secondary/5 shrink-0"
+              className="gap-1.5 text-white hover:text-white border-[#727272] hover:bg-[#3e3e3e] hover:border-white shrink-0"
             >
-              <a href={audioUrl} download={`${track.title}.wav`}>
+              <a href={audioUrl} download={track.title}>
                 <Download className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Download</span>
               </a>

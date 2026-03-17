@@ -75,7 +75,8 @@ services:
     container_name: lofty_worker
     env_file: .env
     volumes:
-      - ./model_cache:/app/model_cache
+      - model_cache:/app/model_cache
+      - ace_model_cache:/app/ace_model_cache
     depends_on:
       redis:
         condition: service_healthy
@@ -89,9 +90,14 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       STORAGE_ENDPOINT: minio:9000
-      MODEL_NAME: facebook/musicgen-stereo-large
+      MODEL_NAME: ace-step-1.5
       MODEL_DEVICE: cpu
       MODEL_CACHE_DIR: /app/model_cache
+      ACE_STEP_ENABLED: "true"
+      ACE_STEP_MODEL_PATH: ACE-Step/Ace-Step1.5
+      ACE_STEP_CACHE_DIR: /app/ace_model_cache
+      ACE_STEP_PROJECT_ROOT: /app/ACE-Step-1.5
+      MOCK_GPU: "false"
 
   frontend:
     build:
@@ -112,3 +118,5 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  model_cache:
+  ace_model_cache:

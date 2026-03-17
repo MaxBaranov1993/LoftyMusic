@@ -2,14 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth, SignInButton, UserButton } from "@clerk/nextjs";
-import { Music2 } from "lucide-react";
+import { useAuth, UserButton } from "@clerk/nextjs";
+import { Music2, Settings, Wand2, FileCode2, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
   { href: "/", label: "Generate" },
   { href: "/tracks", label: "My Tracks" },
+  { href: "/fine-tune", label: "Fine-Tune" },
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/api-docs", label: "API", icon: FileCode2 },
+  { href: "/gpu-farm", label: "GPU Farm", icon: Server },
 ];
 
 export default function Navbar() {
@@ -17,12 +21,12 @@ export default function Navbar() {
   const { isSignedIn } = useAuth();
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-xl">
+    <nav className="sticky top-0 z-50 bg-black/90 backdrop-blur-lg">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-md shadow-primary/25 transition-transform duration-200 group-hover:scale-105">
-            <Music2 className="w-5 h-5 text-white" />
+          <div className="w-9 h-9 rounded-full bg-[#1DB954] flex items-center justify-center transition-all duration-200 group-hover:scale-105">
+            <Music2 className="w-5 h-5 text-black" />
           </div>
           <span className="text-xl font-bold tracking-tight text-foreground">
             Lofty
@@ -43,10 +47,10 @@ export default function Navbar() {
                         variant={isActive ? "default" : "ghost"}
                         size="sm"
                         className={cn(
-                          "text-sm font-medium rounded-lg transition-all duration-200",
+                          "text-sm font-bold rounded-full transition-all duration-200",
                           isActive
-                            ? "bg-primary text-white shadow-md shadow-primary/20"
-                            : "text-muted-foreground hover:text-foreground"
+                            ? "bg-white text-black hover:bg-white hover:scale-100"
+                            : "text-[#B3B3B3] hover:text-white hover:bg-transparent hover:scale-105"
                         )}
                       >
                         {item.label}
@@ -56,19 +60,21 @@ export default function Navbar() {
                 })}
               </div>
               <UserButton
+                userProfileMode="navigation"
+                userProfileUrl="/account"
                 appearance={{
                   elements: {
-                    avatarBox: "w-8 h-8 ring-2 ring-border",
+                    avatarBox: "w-8 h-8",
                   },
                 }}
               />
             </>
           ) : (
-            <SignInButton mode="modal">
-              <Button className="rounded-lg shadow-md shadow-primary/20">
+            <Link href="/sign-in">
+              <Button className="hover:scale-105">
                 Sign In
               </Button>
-            </SignInButton>
+            </Link>
           )}
         </div>
       </div>

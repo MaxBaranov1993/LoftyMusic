@@ -44,7 +44,7 @@ async def get_track(
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
     response = TrackResponse.model_validate(track)
-    response.download_url = track_service.get_download_url(track)
+    response.download_url = await track_service.get_download_url(track)
     return response
 
 
@@ -58,5 +58,5 @@ async def download_track(
     track = await track_service.get_track(db, str(track_id), user)
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
-    url = track_service.get_download_url(track)
+    url = await track_service.get_download_url(track)
     return RedirectResponse(url=url, status_code=302)

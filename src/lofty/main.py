@@ -79,7 +79,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )
 
@@ -90,16 +90,19 @@ def create_app() -> FastAPI:
     # Global exception handler
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        import traceback
         logger = structlog.get_logger()
+        tb = traceback.format_exc()
         logger.error(
             "Unhandled exception",
             path=request.url.path,
             method=request.method,
             error=str(exc),
+            traceback=tb,
         )
         return JSONResponse(
             status_code=500,
-            content={"detail": "Internal server error"},
+            content={"detail": str(exc), "traceback": tb},
         )
 
     return application

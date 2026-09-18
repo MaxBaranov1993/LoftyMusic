@@ -1,817 +1,227 @@
-# Lofty — Платформа генерации музыки с помощью ИИ
+# Lofty
 
-**Lofty** — полнофункциональная платформа для генерации музыки на базе нейросетей с поддержкой дообучения и распределённой GPU-инфраструктуры. Генерация музыки из текстовых промптов с помощью моделей ACE-Step 1.5 и YuE, обучение собственных LoRA-адаптеров на вашем аудио, масштабирование на локальные GPU, Google Colab или облачные провайдеры (RunPod, Vast.ai).
+**An AI music generation platform with distributed GPU execution, model fine-tuning, and production-oriented inference infrastructure.**
 
----
+Lofty is a full-stack system for generating music from text prompts, running open generative-audio models, managing long-running jobs, and training reusable adapters on custom datasets.
 
-## Содержание
+The project is designed to separate the product experience from the GPU execution layer, allowing generation workloads to run locally, on external workers, or on cloud GPU infrastructure.
 
-- [Обзор архитектуры](#обзор-архитектуры)
-- [Технологический стек](#технологический-стек)
-- [Структура проекта](#структура-проекта)
-- [Быстрый старт](#быстрый-старт)
-- [Документация REST API](#документация-rest-api)
-- [Модели базы данных](#модели-базы-данных)
-- [Движки генерации музыки](#движки-генерации-музыки)
-- [Архитектура воркеров](#архитектура-воркеров)
-- [Интеграция с GPU-фермой](#интеграция-с-gpu-фермой)
-- [Аутентификация и безопасность](#аутентификация-и-безопасность)
-- [Прогресс в реальном времени (SSE)](#прогресс-в-реальном-времени-sse)
-- [Пайплайн дообучения](#пайплайн-дообучения)
-- [Справочник переменных окружения](#справочник-переменных-окружения)
-- [Развёртывание](#развёртывание)
+## What Lofty explores
 
----
+Most generative-audio demos stop at a single model invocation. Lofty focuses on the infrastructure around the model:
 
-## Обзор архитектуры
+- user authentication;
+- asynchronous generation jobs;
+- GPU workers;
+- progress streaming;
+- object storage;
+- model selection;
+- training datasets;
+- LoRA / LoKR fine-tuning;
+- autoscaling and worker orchestration.
 
-```
-                    ┌─────────────┐
-                    │  Next.js 14 │
-                    │  Фронтенд   │
-                    └──────┬──────┘
-                           │ HTTP / SSE
-                    ┌──────▼──────┐
-                    │  FastAPI    │     ┌──────────────┐
-                    │  API Сервер ├─────►  PostgreSQL  │
-                    └──┬───┬──┬──┘     └──────────────┘
-                       │   │  │
-              ┌────────┘   │  └────────────┐
-              ▼            ▼               ▼
-        ┌──────────┐ ┌──────────┐   ┌──────────┐
-        │  Redis   │ │  MinIO   │   │  Celery  │
-        │  Кэш/   │ │  S3      │   │  Воркер  │
-        │  Очередь │ │  Хранил. │   │ (локал.) │
-        └──────────┘ └──────────┘   └──────────┘
-                                          │
-              ┌───────────────────────────┘
-              │
-     ┌────────▼────────┐     ┌──────────────────┐
-     │  ACE-Step 1.5   │     │  Google Colab /   │
-     │  YuE Engine     │     │  RunPod / Vast.ai │
-     │  (GPU воркеры)  │     │  (HTTP Polling)   │
-     └─────────────────┘     └──────────────────┘
-```
+## Core capabilities
 
-**Ключевые принципы проектирования:**
+- **Text-to-music generation** with ACE-Step 1.5 and experimental YuE support.
+- **Asynchronous GPU jobs** backed by Celery and Redis.
+- **Remote worker protocol** so GPU machines do not need direct database access.
+- **Real-time generation progress** through Server-Sent Events.
+- **Fine-tuning pipeline** for custom audio datasets and adapter training.
+- **LoRA / LoKR adapters** for reusable model customization.
+- **Multiple compute modes** for local, Google Colab-style, or cloud workers.
+- **S3-compatible storage** for generated audio, datasets, and model artifacts.
+- **Autoscaling primitives** based on queue depth and worker availability.
+- **Clerk authentication** with server-side JWT verification.
 
-- **Воркеры не обращаются к БД** — все параметры передаются заранее, результаты сохраняются в Redis, API синхронизирует с БД асинхронно. Это позволяет удалённым воркерам (Colab) работать без учётных данных БД.
-- **Два режима вычислений** — CPU (локальный Celery) и GPU (HTTP-поллинг от удалённых воркеров).
-- **Тикет-система для SSE** — короткоживущие одноразовые токены для стриминга прогресса без раскрытия JWT в URL.
-- **Распределённые блокировки** — Redis `SET NX` предотвращает дублирование задач генерации у одного пользователя.
+## Architecture
 
----
-
-## Технологический стек
-
-| Слой | Технология |
-|------|------------|
-| **Фронтенд** | Next.js 14, TypeScript, Tailwind CSS, Clerk Auth |
-| **API** | FastAPI, Pydantic 2, Uvicorn |
-| **База данных** | PostgreSQL 16, SQLAlchemy 2.0 (async) |
-| **Очередь задач** | Redis + Celery 5.4 |
-| **Хранилище** | MinIO / AWS S3 (Boto3) |
-| **Аутентификация** | Clerk (JWT/JWKS верификация) |
-| **ML-модели** | ACE-Step 1.5, YuE, PyTorch 2.5+, PEFT (LoRA) |
-| **Инфраструктура** | Docker Compose |
-
----
-
-## Структура проекта
-
-```
-lofty/
-├── src/lofty/                    # Python бэкенд
-│   ├── api/                      # Обработчики маршрутов FastAPI
-│   │   ├── router.py             # Центральный агрегатор роутеров
-│   │   ├── health.py             # Проверки здоровья сервиса
-│   │   ├── jobs.py               # Задачи генерации музыки
-│   │   ├── tracks.py             # Листинг/скачивание треков
-│   │   ├── uploads.py            # Загрузка аудиофайлов
-│   │   ├── datasets.py           # Датасеты для дообучения
-│   │   ├── finetune.py           # Задачи дообучения и LoRA-адаптеры
-│   │   ├── gpu.py                # Управление GPU-инфраструктурой
-│   │   ├── sse.py                # Server-Sent Events стриминг
-│   │   └── worker.py             # API для HTTP-поллинга воркеров
-│   ├── models/                   # SQLAlchemy ORM модели
-│   ├── schemas/                  # Pydantic схемы запросов/ответов
-│   ├── services/                 # Бизнес-логика
-│   ├── worker/                   # Celery-задачи и ML-движки
-│   │   └── engines/              # Реализации ACE-Step, YuE
-│   ├── infra/                    # GPU-провизионер и автоскейлер
-│   ├── auth/                     # Clerk JWT верификация
-│   ├── db/                       # Асинхронная фабрика сессий SQLAlchemy
-│   ├── main.py                   # Фабрика приложения FastAPI
-│   ├── config.py                 # Настройки (переменные окружения)
-│   └── dependencies.py           # FastAPI dependency injection
-├── migrations/                   # Миграции БД (Alembic)
-├── frontend/                     # Next.js 14 приложение
-│   ├── src/app/                  # Страницы (дашборд, треки, дообучение, GPU-ферма)
-│   ├── src/components/           # React-компоненты
-│   └── src/hooks/                # Пользовательские хуки
-├── docker/                       # Dockerfiles (api, worker, worker-gpu, frontend)
-├── scripts/                      # Утилитарные скрипты
-├── tests/                        # Тесты
-├── docker-compose.yml            # Локальное окружение разработки
-└── pyproject.toml                # Python-зависимости и конфигурация
+```text
+                    Next.js 16
+                   React 19 UI
+                        │
+                        ▼
+                  FastAPI service
+                        │
+          ┌─────────────┼──────────────┐
+          ▼             ▼              ▼
+     PostgreSQL       Redis         S3 / MinIO
+        data       queue/cache        files
+                        │
+                        ▼
+                     Celery
+                        │
+            ┌───────────┴───────────┐
+            ▼                       ▼
+       Local worker            Remote GPU worker
+                                    │
+                          ┌─────────┼─────────┐
+                          ▼         ▼         ▼
+                       Colab     RunPod    Vast.ai
 ```
 
----
+Remote GPU workers interact with Lofty through an HTTP worker API, allowing inference infrastructure to stay decoupled from application database credentials.
 
-## Быстрый старт
+## Technology
 
-### Требования
+**Frontend**
+- Next.js 16
+- React 19
+- TypeScript
+- Tailwind CSS
+- Radix UI
+- Clerk
 
-- Docker и Docker Compose
-- Node.js 18+ (для разработки фронтенда)
-- Python 3.12+ (для разработки бэкенда)
-- Аккаунт [Clerk](https://clerk.com) (аутентификация)
+**Backend**
+- Python 3.12+
+- FastAPI
+- SQLAlchemy 2
+- Alembic
+- Pydantic
+- PostgreSQL
 
-### Запуск через Docker
+**Jobs and infrastructure**
+- Celery
+- Redis
+- Docker Compose
+- S3 / MinIO
+- SSE progress streaming
+
+**AI / audio**
+- PyTorch
+- Transformers
+- ACE-Step 1.5
+- YuE experimentation
+- PEFT
+- LoRA / LoKR
+- SoundFile / SciPy
+
+## Generation pipeline
+
+```text
+Prompt
+  │
+  ▼
+API job
+  │
+  ▼
+Redis / Celery queue
+  │
+  ▼
+GPU worker
+  │
+  ├── model inference
+  ├── progress updates
+  └── cancellation checks
+  │
+  ▼
+Object storage
+  │
+  ▼
+Track metadata + secure result delivery
+```
+
+Long-running inference is intentionally moved out of the request/response cycle, keeping the API responsive while workers handle expensive GPU workloads independently.
+
+## Worker architecture
+
+Lofty supports two worker patterns.
+
+### Managed local workers
+
+Celery workers consume generation jobs from Redis and execute them on the available machine.
+
+### Remote GPU workers
+
+External workers poll the API for work, report progress, check cancellation state, and upload results over HTTP.
+
+This means a disposable GPU machine only needs:
+
+- the Lofty API URL;
+- a worker API key;
+- model/runtime dependencies.
+
+It does **not** need PostgreSQL or internal service credentials.
+
+## Fine-tuning workflow
+
+```text
+Audio uploads
+     │
+     ▼
+Dataset + metadata
+     │
+     ▼
+Pre-processing
+     │
+     ▼
+LoRA / LoKR training
+     │
+     ▼
+Adapter artifact
+     │
+     ▼
+Generation job using adapter
+```
+
+Dataset records can include lyrics, BPM, key, and other metadata used by the training pipeline.
+
+## Security and reliability
+
+- Clerk JWT verification through JWKS.
+- Rate limiting backed by Redis.
+- Presigned object-storage URLs.
+- Short-lived, single-use SSE tickets.
+- Worker authentication through a dedicated API key.
+- User-level data isolation.
+- Redis distributed locks for duplicate-job protection.
+- Periodic cleanup of stale jobs.
+- Queue-aware autoscaling primitives.
+
+## Local development
+
+Requirements: Docker, Docker Compose, and the required authentication/model environment variables.
 
 ```bash
-# Клонировать репозиторий
-git clone https://github.com/MaxBaranov1993/LoftyMusic.git
-cd LoftyMusic
-
-# Скопировать файл окружения и заполнить значения
-cp .env.example .env
-
-# Запустить все сервисы
-docker-compose up
-
-# Применить миграции БД
-docker-compose exec api alembic upgrade head
+docker compose up --build
 ```
 
-Сервисы будут доступны по адресам:
-- **Фронтенд**: http://localhost:3000
-- **API**: http://localhost:8000
-- **Swagger UI**: http://localhost:8000/docs
-- **MinIO Console**: http://localhost:9001
+The development stack includes:
 
-### Локальная разработка (без Docker)
+- PostgreSQL
+- Redis
+- MinIO
+- FastAPI
+- Celery worker
+- Next.js frontend
+
+For development without a production GPU, the worker layer also supports mock execution modes.
+
+## Python development
 
 ```bash
-# Бэкенд
 pip install -e ".[dev]"
-uvicorn lofty.main:create_app --factory --reload --port 8000
-
-# Воркер (локальный, мок-режим)
-MOCK_GPU=true celery -A lofty.worker.celery_app worker -Q gpu -l info
-
-# Фронтенд
-cd frontend && npm install && npm run dev
+pytest
 ```
+
+Optional worker/model dependencies are separated into extras so API development does not require installing the full GPU stack.
+
+## Repository structure
+
+```text
+src/lofty/        backend application
+frontend/         Next.js product UI
+docker/           API, worker, and frontend images
+tests/            automated tests
+pyproject.toml    Python dependencies and tooling
+docker-compose.yml
+```
+
+## Status
+
+**Experimental AI infrastructure / active development.**
+
+Lofty is a product and engineering experiment focused on the systems required to turn open generative-audio models into a usable multi-user application.
 
 ---
 
-## Документация REST API
-
-Все эндпоинты имеют префикс `/api/v1`. Аутентификация через заголовок `Authorization: Bearer <clerk_jwt>`.
-
-Интерактивный Swagger UI доступен по адресу `/docs` при запущенном API.
-
-### Проверки здоровья
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `GET` | `/health` | Базовая проверка |
-| `GET` | `/health/ready` | Готовность (БД + Redis + хранилище) |
-
-### Задачи генерации музыки
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `POST` | `/api/v1/jobs` | Создать задачу генерации |
-| `GET` | `/api/v1/jobs` | Список задач пользователя (пагинация) |
-| `GET` | `/api/v1/jobs/{job_id}` | Детали задачи |
-| `POST` | `/api/v1/jobs/{job_id}/cancel` | Отменить задачу |
-| `DELETE` | `/api/v1/jobs/{job_id}` | Удалить задачу и связанные данные |
-
-#### Запрос на создание задачи
-
-```json
-{
-  "prompt": "эпический оркестровый саундтрек с драматическими струнными",
-  "lyrics": "[verse]\nВосстаю из пепла...",
-  "duration_seconds": 60,
-  "model_name": "ace-step-1.5",
-  "compute_mode": "gpu",
-  "lora_adapter_id": "uuid-или-null",
-  "generation_params": {
-    "inference_steps": 8,
-    "guidance_scale": 5.0,
-    "bpm": 120,
-    "key": "C major",
-    "time_signature": "4/4"
-  }
-}
-```
-
-#### Ответ
-
-```json
-{
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "running",
-  "prompt": "эпический оркестровый саундтрек",
-  "model_name": "ace-step-1.5",
-  "compute_mode": "gpu",
-  "progress": 45,
-  "created_at": "2026-03-17T12:00:00Z",
-  "started_at": "2026-03-17T12:00:05Z",
-  "track": null
-}
-```
-
-**Жизненный цикл статусов:**
-```
-pending → queued → running → completed
-                           → failed
-                           → cancelled
-```
-
-### Треки (сгенерированное аудио)
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `GET` | `/api/v1/tracks` | Список треков пользователя |
-| `GET` | `/api/v1/tracks/{track_id}` | Информация о треке с URL для скачивания |
-| `GET` | `/api/v1/tracks/{track_id}/download` | Редирект на presigned S3 URL |
-
-#### Ответ
-
-```json
-{
-  "id": "track-uuid",
-  "title": "эпический оркестровый саундтрек",
-  "storage_key": "tracks/user-id/track-id.mp3",
-  "file_size_bytes": 1048576,
-  "duration_seconds": 60.0,
-  "sample_rate": 32000,
-  "format": "mp3",
-  "download_url": "https://storage.example.com/tracks/...?X-Amz-Signature=...",
-  "created_at": "2026-03-17T12:01:00Z"
-}
-```
-
-### Загрузка аудиофайлов
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `POST` | `/api/v1/uploads` | Загрузить аудио (WAV/MP3/FLAC/OGG, макс. 50 МБ) |
-| `GET` | `/api/v1/uploads` | Список загрузок пользователя |
-| `GET` | `/api/v1/uploads/{upload_id}` | Детали загрузки |
-| `DELETE` | `/api/v1/uploads/{upload_id}` | Удалить загрузку |
-
-### Датасеты (для дообучения)
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `POST` | `/api/v1/datasets` | Создать датасет |
-| `GET` | `/api/v1/datasets` | Список датасетов пользователя |
-| `GET` | `/api/v1/datasets/{dataset_id}` | Датасет с треками |
-| `POST` | `/api/v1/datasets/{dataset_id}/tracks` | Добавить трек в датасет |
-| `DELETE` | `/api/v1/datasets/{dataset_id}/tracks/{track_id}` | Удалить трек из датасета |
-| `POST` | `/api/v1/datasets/{dataset_id}/process` | Обработать датасет |
-| `DELETE` | `/api/v1/datasets/{dataset_id}` | Удалить датасет |
-
-### Дообучение (Fine-Tuning)
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `POST` | `/api/v1/finetune` | Запустить задачу дообучения |
-| `GET` | `/api/v1/finetune` | Список задач дообучения |
-| `GET` | `/api/v1/finetune/{job_id}` | Детали задачи дообучения |
-| `POST` | `/api/v1/finetune/{job_id}/cancel` | Отменить дообучение |
-| `DELETE` | `/api/v1/finetune/{job_id}` | Удалить задачу дообучения |
-| `GET` | `/api/v1/adapters` | Список LoRA-адаптеров |
-| `GET` | `/api/v1/adapters/{adapter_id}` | Детали адаптера |
-| `DELETE` | `/api/v1/adapters/{adapter_id}` | Удалить адаптер |
-
-#### Запрос на дообучение
-
-```json
-{
-  "name": "Мой джазовый адаптер",
-  "dataset_id": "dataset-uuid",
-  "compute_mode": "gpu",
-  "config": {
-    "max_epochs": 50,
-    "batch_size": 4,
-    "learning_rate": 0.0001,
-    "lora_rank": 16,
-    "training_method": "lora"
-  }
-}
-```
-
-### GPU-инфраструктура
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `GET` | `/api/v1/gpu/settings` | Получить конфигурацию GPU-бэкенда |
-| `PUT` | `/api/v1/gpu/settings` | Обновить настройки GPU |
-| `GET` | `/api/v1/gpu/status` | Статус инфраструктуры и метрики |
-| `POST` | `/api/v1/gpu/instances/spin-up` | Вручную создать GPU-инстанс |
-| `POST` | `/api/v1/gpu/instances/{id}/tear-down` | Завершить инстанс |
-
-### Стриминг в реальном времени (SSE)
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `POST` | `/api/v1/jobs/{job_id}/stream/ticket` | Получить тикет для SSE (TTL 30 сек.) |
-| `GET` | `/api/v1/jobs/{job_id}/stream?ticket=<t>` | Стрим событий прогресса |
-
-### Worker API (для удалённых GPU-воркеров)
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `GET` | `/api/v1/worker/next-job` | Забрать следующую задачу (атомарно) |
-| `POST` | `/api/v1/worker/{job_id}/result` | Загрузить результат генерации |
-| `POST` | `/api/v1/worker/{job_id}/progress` | Сообщить прогресс (0-100) |
-| `GET` | `/api/v1/worker/{job_id}/cancelled` | Проверить, отменена ли задача |
-
-### Пользователи
-
-| Метод | Эндпоинт | Описание |
-|-------|----------|----------|
-| `GET` | `/api/v1/users/me` | Профиль текущего пользователя |
-
----
-
-## Модели базы данных
-
-### ER-диаграмма
-
-```
-┌──────────┐     ┌─────────────────┐     ┌──────────┐
-│  users   │────<│ generation_jobs  │────<│  tracks  │
-└──────────┘     └─────────────────┘     └──────────┘
-     │                    │
-     │           ┌────────┴────────┐
-     │           │  lora_adapters  │
-     │           └────────┬────────┘
-     │                    │
-     │           ┌────────┴────────┐
-     │           │ finetune_jobs   │
-     │           └─────────────────┘
-     │
-     ├────<┌──────────────┐
-     │     │audio_uploads │
-     │     └──────────────┘
-     │
-     └────<┌──────────┐     ┌────────────────┐
-           │ datasets  │────<│ dataset_tracks │
-           └──────────┘     └────────────────┘
-```
-
-### Основные таблицы
-
-| Таблица | Описание |
-|---------|----------|
-| `users` | Синхронизируется из Clerk. Поля: `clerk_id`, `email`, `display_name` |
-| `generation_jobs` | Задачи генерации. Статусы: pending → queued → running → completed/failed/cancelled |
-| `tracks` | Сгенерированные аудиофайлы. Связь 1:1 с завершёнными задачами |
-| `audio_uploads` | Загруженные пользователем аудио для датасетов дообучения |
-| `datasets` | Коллекции аудиотреков для обучения |
-| `dataset_tracks` | Связующая таблица: загрузки привязаны к датасетам с метаданными (текст, BPM, тональность) |
-| `finetune_jobs` | Задачи обучения LoRA. Отслеживание прогресса 0-100% |
-| `lora_adapters` | Обученные LoRA-веса. Связь 1:1 с завершёнными задачами дообучения |
-
-### Миграции
-
-```bash
-# Применить все миграции
-alembic upgrade head
-
-# Создать новую миграцию
-alembic revision --autogenerate -m "описание"
-```
-
-| Версия | Описание |
-|--------|----------|
-| 001 | Начальная схема (users, jobs, tracks) |
-| 002 | Составные индексы для производительности запросов |
-| 003 | Поддержка ACE-Step (model_name, generation_params, lora_adapter_id) |
-| 004 | Модели дообучения (finetune_jobs, lora_adapters, datasets, uploads) |
-| 005 | Колонка compute_mode (маршрутизация CPU vs GPU) |
-
----
-
-## Движки генерации музыки
-
-### ACE-Step 1.5 (основной)
-
-Гибридная архитектура Language Model + Diffusion Transformer для высококачественной генерации музыки.
-
-| Параметр | Диапазон | По умолч. | Описание |
-|----------|----------|-----------|----------|
-| `inference_steps` | 1-8 | 8 | Шаги диффузии (больше = выше качество) |
-| `guidance_scale` | 1-10 | 5.0 | Сила следования промпту |
-| `bpm` | 60-200 | авто | Удары в минуту |
-| `key` | C major, A minor и т.д. | авто | Тональность |
-| `time_signature` | 4/4, 3/4, 6/8 | 4/4 | Музыкальный размер |
-| `task_type` | text2music, lyrics2music | text2music | Режим генерации |
-
-- **Макс. длительность**: 120 секунд (безопасно для Colab T4)
-- **Частота дискретизации**: 32 000 Гц
-- **Поддержка LoRA**: подключение адаптеров через `lora_adapter_id`
-- **CPU offload**: включается через `ACE_STEP_CPU_OFFLOAD=true` для экономии VRAM
-
-### YuE (экспериментальный)
-
-Двухстадийная архитектура (S1 — 7B параметров + S2 — 1B параметров) для генерации вокальной музыки.
-
-| Параметр | Диапазон | По умолч. | Описание |
-|----------|----------|-----------|----------|
-| `temperature` | 0.1-2.0 | 0.8 | Температура сэмплирования |
-| `top_p` | 0.1-1.0 | 0.9 | Nucleus sampling |
-| `repetition_penalty` | 1.0-2.0 | 1.2 | Штраф за повторения |
-| `num_segments` | 1-2 | 1 | Количество сегментов |
-
-- **Макс. длительность**: 60 секунд
-- **Требуется**: текст песни (lyrics)
-- **4-битная квантизация**: включается через `YUE_USE_4BIT=true` для Colab
-
-### Мок-генератор (разработка)
-
-Генерирует тишину для тестирования без GPU. Включается через `MOCK_GPU=true`.
-
----
-
-## Архитектура воркеров
-
-### Локальные воркеры (Celery)
-
-```
-FastAPI → Redis (брокер) → Celery Worker → Redis (результаты) → FastAPI → PostgreSQL
-```
-
-Задачи отправляются при `compute_mode="cpu"`. Воркер выполняет задачу локально на доступном оборудовании.
-
-### Удалённые воркеры (HTTP-поллинг)
-
-```
-Удалённый GPU-воркер ──► GET  /worker/next-job        (забрать задачу)
-                     ──► POST /worker/{id}/progress    (отправить прогресс)
-                     ──► GET  /worker/{id}/cancelled   (проверить отмену)
-                     ──► POST /worker/{id}/result      (загрузить результат)
-```
-
-Задачи с `compute_mode="gpu"` остаются в статусе `pending`. Удалённые воркеры (Colab, RunPod) опрашивают API для получения и обработки задач. **Учётные данные БД не нужны** — воркеры взаимодействуют только через HTTP и S3.
-
-### Celery Beat (периодические задачи)
-
-| Задача | Интервал | Описание |
-|--------|----------|----------|
-| `cleanup_stale_jobs` | 5 мин | Таймаут задач в pending/running >10 мин |
-| `run_autoscaler` | 30 сек | Масштабирование GPU-инстансов по глубине очереди |
-
----
-
-## Интеграция с GPU-фермой
-
-Lofty поддерживает три бэкенда GPU-инфраструктуры, настраиваемых через переменную `GPU_BACKEND`.
-
-### Архитектура
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                    Lofty API Сервер                        │
-│                                                          │
-│  ┌─────────────┐    ┌─────────────┐    ┌──────────────┐ │
-│  │ Настройки   │    │ Автоскейлер │    │ Worker API   │ │
-│  │  GPU        │    │  (30 сек)   │    │ (HTTP Poll)  │ │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬───────┘ │
-│         │                  │                   │         │
-│         └──────────┬───────┘                   │         │
-│                    ▼                           │         │
-│         ┌──────────────────┐                   │         │
-│         │  GpuProvisioner  │                   │         │
-│         │  (абстрактный)   │                   │         │
-│         └────────┬─────────┘                   │         │
-│                  │                             │         │
-└──────────────────┼─────────────────────────────┼─────────┘
-                   │                             │
-        ┌──────────┼──────────┐                  │
-        ▼          ▼          ▼                  ▼
-  ┌──────────┐ ┌────────┐ ┌────────┐   ┌──────────────┐
-  │ Локальный│ │ Google │ │ Облако │   │ GPU-воркеры  │
-  │  GPU     │ │ Colab  │ │RunPod/ │   │ (любой бэк.) │
-  │          │ │        │ │Vast.ai │   │              │
-  └──────────┘ └────────┘ └────────┘   └──────────────┘
-```
-
-### Бэкенд: `local`
-
-Использует GPU/CPU самой машины. Нулевая конфигурация, нулевая стоимость.
-
-```env
-GPU_BACKEND=local
-```
-
-### Бэкенд: `google` (Colab)
-
-Ручная настройка через Google Colab. Воркеры опрашивают Lofty API для получения задач.
-
-```env
-GPU_BACKEND=google
-WORKER_API_KEY=общий-секретный-ключ
-```
-
-**Настройка Colab:**
-
-1. Откройте Colab-ноутбук из ответа `GET /api/v1/gpu/status`
-2. Укажите URL API и ключ воркера
-3. Воркер автоматически опрашивает задачи, генерирует музыку, загружает результаты
-
-```python
-# Цикл Colab-воркера (упрощённо)
-while True:
-    job = requests.get(f"{API_URL}/worker/next-job", headers=auth).json()
-    if job:
-        audio = generate(job["prompt"], job["params"])
-        requests.post(f"{API_URL}/worker/{job['id']}/result", files={"audio": audio})
-    time.sleep(5)
-```
-
-### Бэкенд: `cloud` (RunPod / Vast.ai)
-
-Провижн через API с автоматическим масштабированием.
-
-```env
-GPU_BACKEND=cloud
-CLOUD_GPU_API_KEY=ваш-ключ-провайдера
-AUTOSCALER_ENABLED=true
-AUTOSCALER_MIN_INSTANCES=0
-AUTOSCALER_MAX_INSTANCES=3
-AUTOSCALER_IDLE_TIMEOUT=300
-```
-
-### Автоскейлер
-
-Автоскейлер запускается каждые 30 секунд и:
-
-1. **Масштабирует ВВЕРХ**, когда задачи в очереди и нет свободных воркеров
-2. **Масштабирует ВНИЗ**, когда очередь пуста и инстансы простаивают дольше `AUTOSCALER_IDLE_TIMEOUT`
-3. Обеспечивает **60-секундный кулдаун** между действиями масштабирования для предотвращения thrashing'а
-
-```
-Глубина очереди > 0 + Нет свободных воркеров → Поднять инстанс (до макс.)
-Глубина очереди = 0 + Простой > таймаут      → Погасить инстанс (до мин.)
-```
-
-### API управления GPU
-
-```bash
-# Проверить статус инфраструктуры
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/api/v1/gpu/status
-
-# Обновить настройки GPU
-curl -X PUT -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"backend": "cloud", "autoscaler_enabled": true}' \
-  http://localhost:8000/api/v1/gpu/settings
-
-# Вручную поднять инстанс
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/api/v1/gpu/instances/spin-up
-
-# Погасить инстанс
-curl -X POST -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8000/api/v1/gpu/instances/{instance_id}/tear-down
-```
-
----
-
-## Аутентификация и безопасность
-
-### Верификация JWT через Clerk
-
-Все эндпоинты `/api/v1/*` требуют валидный JWT-токен Clerk:
-
-```
-Authorization: Bearer <clerk_jwt_token>
-```
-
-- JWKS-верификация с **кэшированием на 1 час**
-- Автоматическое создание/обновление пользователей при первом входе (Clerk → PostgreSQL)
-- Проверка issuer в продакшне (предотвращает переиспользование токенов между приложениями)
-
-### Rate Limiting
-
-Rate-лимитер на базе Redis (скользящее окно):
-
-- **По умолчанию**: 10 запросов/минуту на пользователя
-- **Burst**: 3 дополнительных запроса
-- **Fail-closed**: отклоняет запросы при недоступности Redis
-
-### Аутентификация воркеров
-
-Удалённые воркеры аутентифицируются общим API-ключом:
-
-```
-X-Worker-Key: <WORKER_API_KEY>
-```
-
-### Паттерны безопасности
-
-- **Presigned URL** — ссылки на скачивание из S3 истекают через 1 час. Учётные данные хранилища не передаются клиентам.
-- **Тикеты для SSE** — короткоживущие (30 сек.), одноразовые токены для SSE-подключений. Предотвращают утечку JWT в истории браузера/логах.
-- **Распределённые блокировки** — Redis `SET NX` с TTL предотвращает дублирование параллельных задач у одного пользователя.
-- **Изоляция пользователей** — все запросы фильтруются по `user_id`. Пользователи не имеют доступа к данным друг друга.
-
----
-
-## Прогресс в реальном времени (SSE)
-
-### Поток подключения
-
-```
-1. Клиент: POST /api/v1/jobs/{id}/stream/ticket
-   → Ответ: { "ticket": "abc123" }    (действителен 30 секунд)
-
-2. Клиент: GET /api/v1/jobs/{id}/stream?ticket=abc123
-   → SSE-соединение установлено
-
-3. Сервер отправляет события:
-   event: progress
-   data: {"progress": 45, "status": "running"}
-
-   event: complete
-   data: {"track_id": "uuid"}
-
-   event: error
-   data: {"message": "Out of memory"}
-```
-
-### Типы событий
-
-| Событие | Описание | Поля данных |
-|---------|----------|-------------|
-| `progress` | Генерация в процессе | `progress` (0-100), `status` |
-| `complete` | Генерация завершена | `track_id` |
-| `error` | Генерация провалена | `message` |
-| `cancelled` | Задача отменена | — |
-
-### Детали реализации
-
-- Прогресс читается из Redis каждую **1 секунду** (дёшево)
-- Статус задачи читается из БД каждые **5 секунд** (дорого)
-- Результаты синхронизируются из Redis → БД на лету во время стриминга
-- Heartbeat каждые **15 секунд** для поддержания соединения
-
----
-
-## Пайплайн дообучения
-
-### Рабочий процесс
-
-```
-1. Загрузить аудиофайлы       → POST /api/v1/uploads
-2. Создать датасет             → POST /api/v1/datasets
-3. Добавить треки в датасет    → POST /api/v1/datasets/{id}/tracks
-   (с метаданными: текст, BPM, тональность)
-4. Обработать датасет          → POST /api/v1/datasets/{id}/process
-5. Запустить дообучение        → POST /api/v1/finetune
-6. Отслеживать прогресс        → GET  /api/v1/finetune/{id}
-7. Использовать адаптер        → POST /api/v1/jobs
-   (указать lora_adapter_id)
-```
-
-### Конфигурация обучения
-
-```json
-{
-  "max_epochs": 50,
-  "batch_size": 4,
-  "learning_rate": 0.0001,
-  "lora_rank": 16,
-  "training_method": "lora"
-}
-```
-
-### Поддерживаемые методы обучения
-
-- **LoRA** — Low-Rank Adaptation. Эффективное дообучение с маленькими файлами адаптеров.
-- **LoKR** — Low-Rank Kronecker. Альтернативный метод факторизации.
-
----
-
-## Справочник переменных окружения
-
-### Основные
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `DEBUG` | `false` | Режим отладки |
-| `CORS_ORIGINS` | `http://localhost:3000` | Разрешённые CORS-источники |
-
-### База данных
-
-| Переменная | Описание |
-|------------|----------|
-| `DATABASE_URL` | Строка подключения PostgreSQL (`postgresql+asyncpg://...`) |
-
-### Redis
-
-| Переменная | Описание |
-|------------|----------|
-| `REDIS_URL` | URL Redis для кэширования и прогресса |
-| `CELERY_BROKER_URL` | URL брокера задач Celery |
-| `CELERY_RESULT_BACKEND` | URL бэкенда результатов Celery |
-
-### Аутентификация (Clerk)
-
-| Переменная | Описание |
-|------------|----------|
-| `CLERK_PUBLISHABLE_KEY` | Публичный ключ Clerk |
-| `CLERK_SECRET_KEY` | Секретный ключ Clerk |
-| `CLERK_JWKS_URL` | URL эндпоинта JWKS |
-| `CLERK_JWT_ISSUER` | Ожидаемый issuer JWT |
-
-### Хранилище (S3/MinIO)
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `STORAGE_ENDPOINT` | — | Внутренний эндпоинт S3 (напр., `minio:9000`) |
-| `STORAGE_ACCESS_KEY` | — | Ключ доступа S3 |
-| `STORAGE_SECRET_KEY` | — | Секретный ключ S3 |
-| `STORAGE_PUBLIC_ENDPOINT` | — | Публичный эндпоинт для presigned URL |
-| `STORAGE_USE_SSL` | `false` | Включить SSL для подключений к S3 |
-
-### Движок ACE-Step
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `ACE_STEP_ENABLED` | `true` | Включить движок ACE-Step |
-| `MOCK_GPU` | `false` | Использовать мок-генератор (разработка/тестирование) |
-| `ACE_STEP_MODEL_PATH` | — | Путь к весам модели |
-| `ACE_STEP_CACHE_DIR` | — | Директория кэша HuggingFace |
-| `ACE_STEP_CPU_OFFLOAD` | `false` | Выгрузка на CPU для экономии VRAM |
-| `ACE_STEP_MAX_DURATION_SECONDS` | `120` | Макс. длительность генерации |
-
-### Движок YuE
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `YUE_ENABLED` | `false` | Включить движок YuE |
-| `YUE_CACHE_DIR` | — | Директория кэша HuggingFace |
-| `YUE_USE_4BIT` | `false` | Включить 4-битную квантизацию |
-| `YUE_MAX_DURATION_SECONDS` | `60` | Макс. длительность генерации |
-
-### GPU-инфраструктура
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `GPU_BACKEND` | `local` | Бэкенд: `local`, `google`, `cloud` |
-| `AUTOSCALER_ENABLED` | `false` | Включить автомасштабирование по очереди |
-| `AUTOSCALER_MIN_INSTANCES` | `0` | Минимум GPU-инстансов |
-| `AUTOSCALER_MAX_INSTANCES` | `3` | Максимум GPU-инстансов |
-| `AUTOSCALER_IDLE_TIMEOUT` | `300` | Секунд до остановки простаивающего инстанса |
-| `CLOUD_GPU_API_KEY` | — | API-ключ RunPod/Vast.ai |
-| `WORKER_API_KEY` | — | Общий секрет для аутентификации воркеров |
-
-### Rate Limiting
-
-| Переменная | По умолч. | Описание |
-|------------|-----------|----------|
-| `RATE_LIMIT_PER_MINUTE` | `10` | Запросов в минуту на пользователя |
-| `RATE_LIMIT_BURST` | `3` | Допуск burst-запросов |
-
----
-
-## Развёртывание
-
-### Docker Compose (разработка)
-
-```bash
-docker-compose up
-```
-
-Запускает: PostgreSQL, Redis, MinIO, API, Worker (мок-режим GPU), Frontend.
-
-### Продакшн
-
-1. Используйте управляемую PostgreSQL и Redis
-2. Используйте AWS S3 или MinIO на персистентном хранилище
-3. Установите все переменные окружения (особенно `CLERK_*`, учётные данные хранилища)
-4. Укажите `CORS_ORIGINS` на домен фронтенда
-5. Включите SSL/TLS для всех внешних подключений
-6. Примените миграции: `alembic upgrade head`
-
-### GPU-воркер на Google Colab
-
-1. Перейдите на страницу GPU Farm в интерфейсе
-2. Скопируйте сниппет настройки Colab
-3. Запустите в Colab-ноутбуке с GPU-рантаймом
-4. Воркер автоматически опрашивает API и обрабатывает задачи
-
----
-
-## Лицензия
-
-MIT
+Built as an independent exploration of generative audio, distributed inference, and GPU-native product architecture.
